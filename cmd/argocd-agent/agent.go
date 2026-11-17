@@ -271,10 +271,10 @@ func NewAgentRunCommand() *cobra.Command {
 					remoteOpts = append(remoteOpts, client.WithInsecureSkipTLSVerify())
 				} else if rootCAPath != "" {
 					logrus.Infof("Loading root CA certificate from file %s", rootCAPath)
-					remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromFile(rootCAPath))
+					remoteOpts = append(remoteOpts, client.WithRootCAReloadFromFile(rootCAPath))
 				} else {
 					logrus.Infof("Loading root CA certificate from secret %s/%s", namespace, rootCASecretName)
-					remoteOpts = append(remoteOpts, client.WithRootAuthoritiesFromSecret(kubeConfig.Clientset, namespace, rootCASecretName, ""))
+					remoteOpts = append(remoteOpts, client.WithRootCAReloadFromSecret(kubeConfig.Clientset, namespace, rootCASecretName))
 				}
 
 				// If both a certificate and a key are specified on the command
@@ -282,12 +282,12 @@ func NewAgentRunCommand() *cobra.Command {
 				// Otherwise, it will try and load the TLS keypair from a secret.
 				if tlsClientCrt != "" && tlsClientKey != "" {
 					logrus.Infof("Loading client TLS configuration from files cert=%s and key=%s", tlsClientCrt, tlsClientKey)
-					remoteOpts = append(remoteOpts, client.WithTLSClientCertFromFile(tlsClientCrt, tlsClientKey))
+					remoteOpts = append(remoteOpts, client.WithTLSReloadFromFile(tlsClientCrt, tlsClientKey))
 				} else if (tlsClientCrt != "" && tlsClientKey == "") || (tlsClientCrt == "" && tlsClientKey != "") {
 					cmdutil.Fatal("Both --tls-client-cert and --tls-client-key have to be given")
 				} else {
 					logrus.Infof("Loading client TLS certificate from secret %s/%s", namespace, tlsSecretName)
-					remoteOpts = append(remoteOpts, client.WithTLSClientCertFromSecret(kubeConfig.Clientset, namespace, tlsSecretName))
+					remoteOpts = append(remoteOpts, client.WithTLSReloadFromSecret(kubeConfig.Clientset, namespace, tlsSecretName))
 				}
 			}
 
@@ -395,6 +395,12 @@ func NewAgentRunCommand() *cobra.Command {
 			if err != nil {
 				cmdutil.Fatal("Could not create a new agent instance: %v", err)
 			}
+
+			// Watch the client certificate and root CA so the next handshake
+			// can use renewed material. This must start after NewAgent: it
+			// registers the client-go metrics globals that the watchers'
+			// Kubernetes API requests read.
+			remote.StartTLSReload(ctx)
 
 			// Watch the agent's settings ConfigMap for runtime overrides.
 			settingsManager.StartWatcher(ctx, kubeConfig, kubeConfig.Namespace, paramsConfigMap)

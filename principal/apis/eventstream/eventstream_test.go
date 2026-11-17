@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -244,6 +245,50 @@ func TestSubscribe_SendErrorCancelsSubscribeCtx(t *testing.T) {
 
 	close(recvGate)
 	<-subscribeReturned
+}
+
+func Test_observeSubscribeSendErrors(t *testing.T) {
+	t.Run("serializes concurrent Send calls on one stream", func(t *testing.T) {
+		// Two SendWaitingEvents loops can target the same stream when an agent
+		// reconnects before the principal has torn down its previous stream.
+		// gRPC does not allow concurrent SendMsg on one stream, so the wrapper
+		// must never let two Sends reach the underlying stream at once.
+		s := NewServer(queue.NewSendRecvQueues(), event.NewEventWritersMap(), nil, &cluster.Manager{})
+		c := &client{agentName: "agent-a", logCtx: logrus.NewEntry(logrus.New())}
+
+		var inFlight, maxInFlight atomic.Int32
+		st := &mock.MockEventServer{AgentName: "agent-a"}
+		st.AddSendHook(func(_ *mock.MockEventServer, _ *eventstreamapi.Event) error {
+			n := inFlight.Add(1)
+			for {
+				m := maxInFlight.Load()
+				if n <= m || maxInFlight.CompareAndSwap(m, n) {
+					break
+				}
+			}
+			time.Sleep(time.Millisecond)
+			inFlight.Add(-1)
+			return nil
+		})
+
+		target := s.observeSubscribeSendErrors(c, st)
+
+		const senders, sendsEach = 4, 20
+		var wg sync.WaitGroup
+		for range senders {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for range sendsEach {
+					require.NoError(t, target.Send(&eventstreamapi.Event{}))
+				}
+			}()
+		}
+		wg.Wait()
+
+		assert.Equal(t, int32(1), maxInFlight.Load())
+		assert.Equal(t, uint32(senders*sendsEach), st.NumSent.Load())
+	})
 }
 
 func TestDisconnectAll(t *testing.T) {

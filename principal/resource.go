@@ -179,7 +179,7 @@ func (s *Server) processResourceRequest(w http.ResponseWriter, r *http.Request, 
 			"agent":     agentName,
 			"uuid":      string(sentUUID),
 		}).Info("Proxying pod log request")
-		if err := s.logStream.RegisterHTTP(sentUUID, w, r); err != nil {
+		if err := s.logStream.RegisterHTTP(sentUUID, agentName, w, r); err != nil {
 			logCtx.Errorf("Could not register HTTP writer for log streaming: %v", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return

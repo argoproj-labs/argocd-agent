@@ -27,7 +27,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/test/e2e/fixture"
 
-	"github.com/argoproj/argo-cd/gitops-engine/pkg/health"
+	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/health"
 	argocdclient "github.com/argoproj/argo-cd/v3/pkg/apiclient"
 	"github.com/argoproj/argo-cd/v3/pkg/apiclient/application"
 	sessionpkg "github.com/argoproj/argo-cd/v3/pkg/apiclient/session"

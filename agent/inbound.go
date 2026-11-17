@@ -619,6 +619,10 @@ func (a *Agent) processIncomingRepository(ev *event.Event) error {
 		if err != nil {
 			return fmt.Errorf("failed to compare the source UID of app: %w", err)
 		}
+
+		// In managed mode, Drop ownerReferences from the incoming resource
+		// This can lead to garbage-collection of the resource on the agent cluster, if referenced owner is missing. For example, ExternalSecret
+		incomingRepo.OwnerReferences = nil
 	}
 
 	switch ev.Type() {

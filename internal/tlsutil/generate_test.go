@@ -164,3 +164,63 @@ func Test_GenerateCertificatesWithAlgorithms(t *testing.T) {
 		})
 	}
 }
+
+func Test_GenerateCertificates_Inputs(t *testing.T) {
+	caCertData, caKeyData, err := GenerateCaCertificate("ca", DefaultCACertValidityDays, KeyGenOptions{Algorithm: "ecdsa-p256"})
+	require.NoError(t, err)
+	ca, err := tls.X509KeyPair([]byte(caCertData), []byte(caKeyData))
+	require.NoError(t, err)
+	_, otherKeyData, err := GenerateCaCertificate("other", DefaultCACertValidityDays, KeyGenOptions{Algorithm: "ecdsa-p256"})
+	require.NoError(t, err)
+	other, err := ParsePrivateKeyFromPEM([]byte(otherKeyData))
+	require.NoError(t, err)
+	unsupported := KeyGenOptions{Algorithm: "dsa"}
+
+	t.Run("a CA with an algorithm that is not supported", func(t *testing.T) {
+		certPEM, keyPEM, err := GenerateCaCertificate("ca", DefaultCACertValidityDays, unsupported)
+
+		require.ErrorContains(t, err, "unsupported key algorithm")
+		assert.Empty(t, certPEM)
+		assert.Empty(t, keyPEM)
+	})
+
+	t.Run("a leaf certificate with an algorithm that is not supported", func(t *testing.T) {
+		_, _, err := GenerateClientCertificate("client", ca.Leaf, ca.PrivateKey, DefaultLeafCertValidityDays, unsupported)
+		require.ErrorContains(t, err, "unsupported key algorithm")
+
+		_, _, err = GenerateServerCertificate("server", ca.Leaf, ca.PrivateKey, nil, nil, DefaultLeafCertValidityDays, unsupported)
+		require.ErrorContains(t, err, "unsupported key algorithm")
+	})
+
+	t.Run("a certificate signed with a key that is not the one of the signer", func(t *testing.T) {
+		certPEM, keyPEM, err := GenerateClientCertificate("client", ca.Leaf, other, DefaultLeafCertValidityDays, KeyGenOptions{Algorithm: "ecdsa-p256"})
+
+		require.ErrorContains(t, err, "error creating cert")
+		assert.Empty(t, certPEM)
+		assert.Empty(t, keyPEM)
+	})
+
+	t.Run("a server certificate with a validity that is not valid", func(t *testing.T) {
+		_, _, err := GenerateServerCertificate("server", ca.Leaf, ca.PrivateKey, nil, nil, 0, KeyGenOptions{})
+
+		require.ErrorContains(t, err, "validity days must be greater than 0")
+	})
+
+	t.Run("a server certificate with an IP address that is not valid", func(t *testing.T) {
+		certPEM, keyPEM, err := GenerateServerCertificate("server", ca.Leaf, ca.PrivateKey, []string{"127.0.0.1", "not-an-ip"}, nil, DefaultLeafCertValidityDays, KeyGenOptions{Algorithm: "ecdsa-p256"})
+
+		require.ErrorContains(t, err, "invalid IP address: not-an-ip")
+		assert.Empty(t, certPEM)
+		assert.Empty(t, keyPEM)
+	})
+
+	t.Run("spaces around the IP addresses of a server certificate are ignored", func(t *testing.T) {
+		certPEM, keyPEM, err := GenerateServerCertificate("server", ca.Leaf, ca.PrivateKey, []string{" 10.0.0.1 "}, nil, DefaultLeafCertValidityDays, KeyGenOptions{Algorithm: "ecdsa-p256"})
+
+		require.NoError(t, err)
+		cert, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+		require.NoError(t, err)
+		require.Len(t, cert.Leaf.IPAddresses, 1)
+		assert.True(t, net.ParseIP("10.0.0.1").Equal(cert.Leaf.IPAddresses[0]))
+	})
+}

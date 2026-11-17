@@ -15,18 +15,29 @@
 package redisproxy
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math/big"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/principal/tracker"
+	"github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/google/uuid"
@@ -669,4 +680,500 @@ func Test_rewriteResourcesTreeNamespace(t *testing.T) {
 		_, err := rewriteResourcesTreeNamespace([]byte("not json"), "agent-staging")
 		require.Error(t, err)
 	})
+}
+
+func Test_New(t *testing.T) {
+	sendSync := func(agentName, connectionUUID string, body event.RedisCommandBody) *event.RedisResponseBody {
+		return nil
+	}
+
+	t.Run("stores the provided fields", func(t *testing.T) {
+		customLogger := logging.New(logrus.New())
+		rp := New("127.0.0.1:6379", "redis:6379", sendSync, customLogger)
+
+		require.NotNil(t, rp)
+		require.Equal(t, "127.0.0.1:6379", rp.listenAddress)
+		require.Equal(t, "redis:6379", rp.principalRedisAddress)
+		require.Same(t, customLogger, rp.logger)
+		require.NotNil(t, rp.EventIDTracker)
+		require.NotNil(t, rp.ConnectionIDTracker)
+		require.NotNil(t, rp.sendSynchronousMessageToAgentFn)
+	})
+
+	t.Run("defaults the logger to the default one when nil", func(t *testing.T) {
+		rp := New("addr", "redis", nil, nil)
+
+		require.NotNil(t, rp.logger)
+		require.Same(t, logging.GetDefaultLogger(), rp.logger)
+	})
+}
+
+func Test_RedisProxy_createServerTLSConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, rp *RedisProxy)
+		wantErr string
+		check   func(t *testing.T, cfg *tls.Config)
+	}{
+		{
+			name:    "no certificate configured",
+			setup:   func(t *testing.T, rp *RedisProxy) {},
+			wantErr: "no TLS certificate configured",
+		},
+		{
+			name: "in-memory certificate carries the protocol config",
+			setup: func(t *testing.T, rp *RedisProxy) {
+				certPEM, keyPEM := testcerts.CreateSelfSignedCert(t, "rsa", testcerts.DefaultCertTempl)
+				pair, err := tls.X509KeyPair(certPEM, keyPEM)
+				require.NoError(t, err)
+				leaf, err := x509.ParseCertificate(pair.Certificate[0])
+				require.NoError(t, err)
+
+				rp.SetServerTLS(leaf, pair.PrivateKey)
+				rp.SetServerTLSConfig(tls.VersionTLS12, tls.VersionTLS13,
+					[]uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256},
+					[]tls.CurveID{tls.CurveP256})
+			},
+			check: func(t *testing.T, cfg *tls.Config) {
+				require.Len(t, cfg.Certificates, 1)
+				require.NotNil(t, cfg.Certificates[0].Leaf)
+				require.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
+				require.Equal(t, uint16(tls.VersionTLS13), cfg.MaxVersion)
+				require.Equal(t, []uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}, cfg.CipherSuites)
+				require.Equal(t, []tls.CurveID{tls.CurveP256}, cfg.CurvePreferences)
+			},
+		},
+		{
+			name: "certificate loaded from valid paths",
+			setup: func(t *testing.T, rp *RedisProxy) {
+				base := filepath.Join(t.TempDir(), "server")
+				testcerts.WriteSelfSignedCert(t, "rsa", base, testcerts.DefaultCertTempl)
+				rp.SetServerTLSFromPath(base+".crt", base+".key")
+			},
+			check: func(t *testing.T, cfg *tls.Config) {
+				require.Len(t, cfg.Certificates, 1)
+			},
+		},
+		{
+			name: "certificate paths take precedence over the in-memory certificate",
+			setup: func(t *testing.T, rp *RedisProxy) {
+				memPEM, memKeyPEM := testcerts.CreateSelfSignedCert(t, "rsa", testcerts.DefaultCertTempl)
+				memPair, err := tls.X509KeyPair(memPEM, memKeyPEM)
+				require.NoError(t, err)
+				memLeaf, err := x509.ParseCertificate(memPair.Certificate[0])
+				require.NoError(t, err)
+				rp.SetServerTLS(memLeaf, memPair.PrivateKey)
+
+				pathTempl := testcerts.DefaultCertTempl
+				pathTempl.SerialNumber = big.NewInt(42)
+				base := filepath.Join(t.TempDir(), "server")
+				testcerts.WriteSelfSignedCert(t, "rsa", base, pathTempl)
+				rp.SetServerTLSFromPath(base+".crt", base+".key")
+			},
+			check: func(t *testing.T, cfg *tls.Config) {
+				require.Len(t, cfg.Certificates, 1)
+				leaf, err := x509.ParseCertificate(cfg.Certificates[0].Certificate[0])
+				require.NoError(t, err)
+				require.Equal(t, int64(42), leaf.SerialNumber.Int64(), "expected the certificate loaded from the paths")
+			},
+		},
+		{
+			name: "a single certificate path falls back to the in-memory certificate",
+			setup: func(t *testing.T, rp *RedisProxy) {
+				memPEM, memKeyPEM := testcerts.CreateSelfSignedCert(t, "rsa", testcerts.DefaultCertTempl)
+				memPair, err := tls.X509KeyPair(memPEM, memKeyPEM)
+				require.NoError(t, err)
+				memLeaf, err := x509.ParseCertificate(memPair.Certificate[0])
+				require.NoError(t, err)
+				rp.SetServerTLS(memLeaf, memPair.PrivateKey)
+
+				rp.SetServerTLSFromPath(filepath.Join(t.TempDir(), "only.crt"), "")
+			},
+			check: func(t *testing.T, cfg *tls.Config) {
+				require.Len(t, cfg.Certificates, 1)
+				leaf, err := x509.ParseCertificate(cfg.Certificates[0].Certificate[0])
+				require.NoError(t, err)
+				require.Equal(t, int64(1), leaf.SerialNumber.Int64(), "expected the in-memory certificate")
+			},
+		},
+		{
+			name: "missing certificate paths are reported",
+			setup: func(t *testing.T, rp *RedisProxy) {
+				dir := t.TempDir()
+				rp.SetServerTLSFromPath(filepath.Join(dir, "missing.crt"), filepath.Join(dir, "missing.key"))
+			},
+			wantErr: "failed to load TLS certificate",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rp := New("addr", "redis", nil, nil)
+			tt.setup(t, rp)
+
+			cfg, err := rp.createServerTLSConfig()
+
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				require.Nil(t, cfg)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, cfg)
+			if tt.check != nil {
+				tt.check(t, cfg)
+			}
+		})
+	}
+}
+
+func Test_parsedRedisCommand_generateParsedCommandDebugString(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  parsedRedisCommand
+		want string
+	}{
+		{
+			name: "parse error is surfaced",
+			cmd:  parsedRedisCommand{err: fmt.Errorf("boom")},
+			want: "error occurred: boom",
+		},
+		{
+			name: "internal message is labelled",
+			cmd:  parsedRedisCommand{internalMsg: []string{"internal-notify", "chan"}},
+			want: "internal message: [internal-notify chan]",
+		},
+		{
+			name: "parsed ASCII command is shown verbatim",
+			cmd:  parsedRedisCommand{parsedReceived: []string{"PING"}},
+			want: "(a->r) 'PING' | ",
+		},
+		{
+			name: "non-ASCII command is summarized by byte length",
+			cmd:  parsedRedisCommand{parsedReceived: []string{"café"}},
+			want: "(a->r) '( 5 bytes )' | ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.cmd.generateParsedCommandDebugString())
+		})
+	}
+}
+
+var errWriteFailed = errors.New("write failed")
+
+// failingWriter is an io.Writer whose Write always fails, to exercise the
+// write-error paths of the proxy's forwarding code.
+type failingWriter struct{}
+
+func (failingWriter) Write(p []byte) (int, error) { return 0, errWriteFailed }
+
+func Test_argoCDRedisWriterInternal_writeToArgoCDRedisSocket(t *testing.T) {
+	logEntry := logging.GetDefaultLogger().ModuleLogger("RedisProxy")
+
+	t.Run("writes and flushes the bytes to the socket", func(t *testing.T) {
+		var out bytes.Buffer
+		w := &argoCDRedisWriterInternal{
+			fromArgoCDWrite: bufio.NewWriter(&out),
+			argoCDWriteLock: &sync.Mutex{},
+		}
+
+		require.NoError(t, w.writeToArgoCDRedisSocket(logEntry, []byte("hello")))
+		require.Equal(t, "hello", out.String())
+	})
+
+	t.Run("returns the error when the socket write fails", func(t *testing.T) {
+		w := &argoCDRedisWriterInternal{
+			fromArgoCDWrite: bufio.NewWriterSize(failingWriter{}, 1),
+			argoCDWriteLock: &sync.Mutex{},
+		}
+
+		require.ErrorIs(t, w.writeToArgoCDRedisSocket(logEntry, []byte("hello")), errWriteFailed)
+	})
+}
+
+func Test_forwardTrafficSimple(t *testing.T) {
+	logEntry := logging.GetDefaultLogger().ModuleLogger("RedisProxy")
+
+	t.Run("forwards all input and returns when the reader is exhausted", func(t *testing.T) {
+		var out bytes.Buffer
+		w := &argoCDRedisWriterInternal{
+			fromArgoCDWrite: bufio.NewWriter(&out),
+			argoCDWriteLock: &sync.Mutex{},
+		}
+		r := bufio.NewReader(strings.NewReader("+PONG\r\n"))
+
+		err := forwardTrafficSimple("r->a", r, w, logEntry)
+
+		require.ErrorIs(t, err, io.EOF)
+		require.Equal(t, "+PONG\r\n", out.String())
+	})
+
+	t.Run("returns the write error when the destination fails", func(t *testing.T) {
+		w := &argoCDRedisWriterInternal{
+			fromArgoCDWrite: bufio.NewWriterSize(failingWriter{}, 1),
+			argoCDWriteLock: &sync.Mutex{},
+		}
+		r := bufio.NewReader(strings.NewReader("data"))
+
+		err := forwardTrafficSimple("r->a", r, w, logEntry)
+
+		require.ErrorIs(t, err, errWriteFailed)
+	})
+}
+
+// fakeUpstreamListener starts a TCP listener on a loopback ephemeral port that
+// accepts and holds connections, so a dial to it succeeds. The listener and any
+// accepted connections are closed when the test ends.
+func fakeUpstreamListener(t *testing.T) net.Listener {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+		}
+	}()
+
+	t.Cleanup(func() {
+		_ = l.Close()
+		mu.Lock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		mu.Unlock()
+	})
+
+	return l
+}
+
+func Test_RedisProxy_establishConnectionToPrincipalRedis(t *testing.T) {
+	logEntry := logging.GetDefaultLogger().ModuleLogger("RedisProxy")
+
+	t.Run("resolve error for an address without a port", func(t *testing.T) {
+		rp := New("addr", "missing-port", nil, nil)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.Nil(t, conn)
+		require.ErrorContains(t, err, "unable to resolve address")
+	})
+
+	t.Run("connection error when nothing is listening", func(t *testing.T) {
+		// Reserve then release a loopback port so the dial is refused deterministically.
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		addr := l.Addr().String()
+		require.NoError(t, l.Close())
+
+		rp := New("addr", addr, nil, nil)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.Nil(t, conn)
+		require.ErrorContains(t, err, "unable to connect to redis")
+	})
+
+	t.Run("returns the connection when the upstream accepts without TLS", func(t *testing.T) {
+		l := fakeUpstreamListener(t)
+		rp := New("addr", l.Addr().String(), nil, nil)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		_ = conn.Close()
+	})
+
+	t.Run("reports a failure to load the upstream CA certificate", func(t *testing.T) {
+		l := fakeUpstreamListener(t)
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetUpstreamTLSCAPath(filepath.Join(t.TempDir(), "missing-ca.pem"))
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.Nil(t, conn)
+		require.ErrorContains(t, err, "failed to load CA certificate")
+	})
+
+	t.Run("returns a plain connection and warns when server TLS is on but upstream TLS is off", func(t *testing.T) {
+		l := fakeUpstreamListener(t)
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetTLSEnabled(true) // server TLS on, no upstream TLS configured
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		_ = conn.Close()
+	})
+
+	t.Run("a handshake failure is reported as such", func(t *testing.T) {
+		l := closingUpstreamListener(t)
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetUpstreamTLSInsecure(true)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.Nil(t, conn)
+		require.ErrorContains(t, err, "TLS handshake failed")
+	})
+
+	t.Run("insecure upstream TLS accepts a certificate that no configured CA trusts", func(t *testing.T) {
+		_, serverCert := upstreamTLSServerCert(t)
+		l := tlsUpstreamServer(t, serverCert)
+
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetUpstreamTLSInsecure(true)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		require.IsType(t, &tls.Conn{}, conn)
+		_ = conn.Close()
+	})
+
+	t.Run("rejects a server certificate that the configured CA does not trust", func(t *testing.T) {
+		_, serverCert := upstreamTLSServerCert(t)
+		l := tlsUpstreamServer(t, serverCert)
+
+		otherCAPEM, _ := upstreamTLSServerCert(t)
+		pool := x509.NewCertPool()
+		require.True(t, pool.AppendCertsFromPEM(otherCAPEM))
+
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetUpstreamTLSCA(pool)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.Nil(t, conn)
+		require.ErrorContains(t, err, "TLS handshake failed")
+		var verifyErr *tls.CertificateVerificationError
+		require.ErrorAs(t, err, &verifyErr)
+	})
+
+	t.Run("establishes a verified TLS connection with a CA pool", func(t *testing.T) {
+		certPEM, serverCert := upstreamTLSServerCert(t)
+		l := tlsUpstreamServer(t, serverCert)
+
+		pool := x509.NewCertPool()
+		require.True(t, pool.AppendCertsFromPEM(certPEM))
+
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetUpstreamTLSCA(pool)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		require.IsType(t, &tls.Conn{}, conn)
+		_ = conn.Close()
+	})
+
+	t.Run("establishes a verified TLS connection with a CA from a file", func(t *testing.T) {
+		certPEM, serverCert := upstreamTLSServerCert(t)
+		l := tlsUpstreamServer(t, serverCert)
+
+		caPath := filepath.Join(t.TempDir(), "ca.pem")
+		require.NoError(t, os.WriteFile(caPath, certPEM, 0o600))
+
+		rp := New("addr", l.Addr().String(), nil, nil)
+		rp.SetUpstreamTLSCAPath(caPath)
+
+		conn, err := rp.establishConnectionToPrincipalRedis(logEntry)
+
+		require.NoError(t, err)
+		require.NotNil(t, conn)
+		require.IsType(t, &tls.Conn{}, conn)
+		_ = conn.Close()
+	})
+}
+
+// closingUpstreamListener accepts connections and immediately closes them, so a
+// TLS handshake against it fails fast (EOF) instead of blocking on the dial
+// deadline.
+func closingUpstreamListener(t *testing.T) net.Listener {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+
+	t.Cleanup(func() { _ = l.Close() })
+	return l
+}
+
+// upstreamTLSServerCert returns a self-signed certificate (PEM) valid for
+// 127.0.0.1 and the matching tls.Certificate, for use as a trusted upstream
+// Redis TLS server.
+func upstreamTLSServerCert(t *testing.T) (certPEM []byte, serverCert tls.Certificate) {
+	t.Helper()
+	templ := testcerts.DefaultCertTempl
+	templ.IsCA = true
+	templ.KeyUsage |= x509.KeyUsageCertSign
+	templ.IPAddresses = []net.IP{net.ParseIP("127.0.0.1")}
+
+	certPEM, keyPEM := testcerts.CreateSelfSignedCert(t, "rsa", templ)
+	serverCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	require.NoError(t, err)
+	return certPEM, serverCert
+}
+
+// tlsUpstreamServer starts a TLS listener on a loopback ephemeral port that
+// drives the server side of the handshake and holds accepted connections until
+// the test ends.
+func tlsUpstreamServer(t *testing.T, serverCert tls.Certificate) net.Listener {
+	t.Helper()
+	l, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{serverCert}})
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+			// Drive the server side of the handshake so the client's completes.
+			if tc, ok := c.(*tls.Conn); ok {
+				go func() { _ = tc.Handshake() }()
+			}
+		}
+	}()
+
+	t.Cleanup(func() {
+		_ = l.Close()
+		mu.Lock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		mu.Unlock()
+	})
+
+	return l
 }

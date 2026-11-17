@@ -25,12 +25,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/terminalstreamapi"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/terminalstream/mock"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Test NewServer
@@ -252,8 +255,19 @@ func TestRegisterUnregisterSession(t *testing.T) {
 
 // Test StreamTerminal handshake
 func TestStreamTerminalHandshake(t *testing.T) {
-	t.Run("fails when handshake message has empty UUID", func(t *testing.T) {
+	t.Run("fails when agent identity is missing", func(t *testing.T) {
 		ctx := context.Background()
+		mockStream := mock.NewMockTerminalStreamServer(ctx)
+
+		server := NewServer()
+		err := server.StreamTerminal(mockStream)
+
+		require.Error(t, err)
+		assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	})
+
+	t.Run("fails when handshake message has empty UUID", func(t *testing.T) {
+		ctx := session.ClientInfoToContext(context.Background(), "test-agent", "managed")
 		mockStream := mock.NewMockTerminalStreamServer(ctx)
 
 		mockStream.SetRecvFunc(func() (*terminalstreamapi.TerminalStreamData, error) {
@@ -270,7 +284,7 @@ func TestStreamTerminalHandshake(t *testing.T) {
 	})
 
 	t.Run("fails when session not found", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := session.ClientInfoToContext(context.Background(), "test-agent", "managed")
 		mockStream := mock.NewMockTerminalStreamServer(ctx)
 
 		mockStream.SetRecvFunc(func() (*terminalstreamapi.TerminalStreamData, error) {
@@ -284,6 +298,32 @@ func TestStreamTerminalHandshake(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("fails when authenticated agent does not own session", func(t *testing.T) {
+		ctx := session.ClientInfoToContext(context.Background(), "other-agent", "managed")
+		mockStream := mock.NewMockTerminalStreamServer(ctx)
+
+		server := NewServer()
+		termSession := &TerminalSession{
+			UUID:      "owned-uuid",
+			AgentName: "test-agent",
+			ToAgent:   make(chan *terminalstreamapi.TerminalStreamData, 10),
+			FromAgent: make(chan *terminalstreamapi.TerminalStreamData, 10),
+			Done:      make(chan struct{}),
+		}
+		server.RegisterSession(termSession)
+
+		mockStream.SetRecvFunc(func() (*terminalstreamapi.TerminalStreamData, error) {
+			return &terminalstreamapi.TerminalStreamData{
+				RequestUuid: "owned-uuid",
+			}, nil
+		})
+
+		err := server.StreamTerminal(mockStream)
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+		assert.Contains(t, err.Error(), "agent mismap between session and caller")
 	})
 }
 

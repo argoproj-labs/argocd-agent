@@ -64,6 +64,7 @@ func downgradeToHTTP1Handler(target string, agentCert tls.Certificate) http.Hand
 
 		// Use reverse proxy with HTTP/1.1 enforcement
 		proxy := &httputil.ReverseProxy{
+			//nolint:staticcheck
 			Director: func(req *http.Request) {
 				req.URL.Host = target
 				if req.URL.Scheme == "" {

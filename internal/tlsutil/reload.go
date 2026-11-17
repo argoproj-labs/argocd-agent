@@ -55,6 +55,8 @@ type TLSFileProvider struct {
 	Material atomic.Pointer[TLSMaterial]
 	// writeMu is used for concurrent on writing only
 	writeMu sync.Mutex
+	// onUpdate is called after valid TLS material is stored.
+	onUpdate func(tls.Certificate, *x509.CertPool)
 }
 
 // TLSSecretProvider watches Kubernetes secrets for updates to the TLS config
@@ -71,6 +73,8 @@ type TLSSecretProvider struct {
 	kubeClient kubernetes.Interface
 	// writeMu is used for concurrent on writing only
 	writeMu sync.Mutex
+	// onUpdate is called after valid TLS material is stored.
+	onUpdate func(tls.Certificate, *x509.CertPool)
 }
 
 // TLSSource is an interface for a struct that intends to watch a source for TLS data
@@ -95,13 +99,33 @@ func NewTLSFileProvider(clientCertPath, clientKeyPath, caCertPath string, materi
 	return provider
 }
 
+// SetUpdateHandler sets the function called after valid TLS material is stored.
+func (t *TLSFileProvider) SetUpdateHandler(fn func(tls.Certificate, *x509.CertPool)) {
+	t.onUpdate = fn
+}
+
+func (t *TLSFileProvider) store(material *TLSMaterial) {
+	t.Material.Store(material)
+	if t.onUpdate != nil && material != nil {
+		t.onUpdate(material.Cert, material.CAPool)
+	}
+}
+
 // TLSFileProvider.Load returns the current TLS data
 func (t *TLSFileProvider) Load() (tls.Certificate, *x509.CertPool) {
-	material := t.Material.Load()
-	if material == nil {
+	return t.Material.Load().clone()
+}
+
+// clone returns the certificate and a copy of the CA pool. The CA pool is nil
+// when the material has no CA source.
+func (m *TLSMaterial) clone() (tls.Certificate, *x509.CertPool) {
+	if m == nil {
 		return tls.Certificate{}, nil
 	}
-	return material.Cert, material.CAPool.Clone()
+	if m.CAPool == nil {
+		return m.Cert, nil
+	}
+	return m.Cert, m.CAPool.Clone()
 }
 
 // TLSFileProvider.Watch watches the file paths provider for the CA, client Cert, and client key for updates
@@ -119,13 +143,17 @@ func (t *TLSFileProvider) Watch(ctx context.Context) error {
 			return err
 		}
 	}
-	err = watcher.Add(filepath.Dir(t.ClientCertPath))
-	if err != nil {
-		return err
+	if t.ClientCertPath != "" {
+		err = watcher.Add(filepath.Dir(t.ClientCertPath))
+		if err != nil {
+			return err
+		}
 	}
-	err = watcher.Add(filepath.Dir(t.ClientKeyPath))
-	if err != nil {
-		return err
+	if t.ClientKeyPath != "" {
+		err = watcher.Add(filepath.Dir(t.ClientKeyPath))
+		if err != nil {
+			return err
+		}
 	}
 
 	for {
@@ -164,16 +192,18 @@ func (t *TLSFileProvider) OnChange(ctx context.Context, event fsnotify.Event) er
 	}).Info("Change detected in TLS data, updating internal store")
 
 	if filepath.Base(event.Name) == "..data" {
-		return t.Reload(ctx)
+		err = t.Reload(ctx)
+	} else {
+		switch event.Name {
+		case t.CAPath:
+			err = t.caOnChange()
+		case t.ClientCertPath, t.ClientKeyPath:
+			err = t.clientOnChange()
+		}
 	}
-
-	switch event.Name {
-	case t.CAPath:
-		err = t.caOnChange()
-	case t.ClientCertPath, t.ClientKeyPath:
-		err = t.clientOnChange()
+	if err == nil {
+		logrus.Info("Successfully updated TLS configuration to have new data")
 	}
-	logrus.Info("Successfully updated TLS configuration to have new data")
 	return err
 }
 
@@ -197,7 +227,7 @@ func (t *TLSFileProvider) clientOnChange() error {
 		caPool = currentMaterial.CAPool
 	}
 
-	t.Material.Store(&TLSMaterial{
+	t.store(&TLSMaterial{
 		Cert:   cert,
 		CAPool: caPool,
 	})
@@ -231,7 +261,7 @@ func (t *TLSFileProvider) caOnChange() error {
 		cert = currentMaterial.Cert
 	}
 
-	t.Material.Store(&TLSMaterial{
+	t.store(&TLSMaterial{
 		Cert:   cert,
 		CAPool: certPool,
 	})
@@ -245,15 +275,17 @@ func (t *TLSFileProvider) Reload(ctx context.Context) error {
 
 	newMaterial := &TLSMaterial{}
 
-	cert, err := TLSCertFromFile(t.ClientCertPath, t.ClientKeyPath, true)
-	if err != nil {
-		return err
-	}
+	if t.ClientCertPath != "" {
+		cert, err := TLSCertFromFile(t.ClientCertPath, t.ClientKeyPath, true)
+		if err != nil {
+			return err
+		}
 
-	if err = validateNewClientCert(cert); err == nil {
-		newMaterial.Cert = cert
-	} else {
-		return fmt.Errorf("failed to validate client cert")
+		if err = validateNewClientCert(cert); err == nil {
+			newMaterial.Cert = cert
+		} else {
+			return fmt.Errorf("failed to validate client cert")
+		}
 	}
 
 	if t.CAPath != "" {
@@ -277,7 +309,7 @@ func (t *TLSFileProvider) Reload(ctx context.Context) error {
 
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
-	t.Material.Store(newMaterial)
+	t.store(newMaterial)
 
 	logrus.Info("Successfully reloaded TLS data")
 
@@ -297,13 +329,21 @@ func NewTLSSecretProvider(clientSecretName, caSecretName, namespace string, kube
 	return provider
 }
 
+// SetUpdateHandler sets the function called after valid TLS material is stored.
+func (t *TLSSecretProvider) SetUpdateHandler(fn func(tls.Certificate, *x509.CertPool)) {
+	t.onUpdate = fn
+}
+
+func (t *TLSSecretProvider) store(material *TLSMaterial) {
+	t.Material.Store(material)
+	if t.onUpdate != nil && material != nil {
+		t.onUpdate(material.Cert, material.CAPool)
+	}
+}
+
 // TLSSecretProvider.Load returns the current TLS config that is set
 func (t *TLSSecretProvider) Load() (tls.Certificate, *x509.CertPool) {
-	material := t.Material.Load()
-	if material == nil {
-		return tls.Certificate{}, nil
-	}
-	return material.Cert, material.CAPool.Clone()
+	return t.Material.Load().clone()
 }
 
 // TLSSecretProvider.Watch creates a Kubernetes secret informer to watch kubernetes secrets for new TLS data
@@ -316,16 +356,10 @@ func (t *TLSSecretProvider) Watch(ctx context.Context) error {
 			return t.kubeClient.CoreV1().Secrets(t.Namespace).Watch(ctx, opts)
 		}),
 		informer.WithAddHandler[*corev1.Secret](func(secret *corev1.Secret) {
-			err := t.OnChange(secret)
-			if err != nil {
-				logrus.WithError(err).Fatal("Failed to change certificates")
-			}
+			t.handleChange(secret)
 		}),
 		informer.WithUpdateHandler[*corev1.Secret](func(old *corev1.Secret, new *corev1.Secret) {
-			err := t.OnChange(new)
-			if err != nil {
-				logrus.WithError(err).Fatal("Failed to change certificates")
-			}
+			t.handleChange(new)
 		}),
 	)
 	if err != nil {
@@ -346,8 +380,17 @@ func (t *TLSSecretProvider) Watch(ctx context.Context) error {
 	return nil
 }
 
+func (t *TLSSecretProvider) handleChange(secret *corev1.Secret) {
+	if err := t.OnChange(secret); err != nil {
+		logrus.WithError(err).WithField(logfields.SecretName, secret.Name).Fatal("Failed to change certificates")
+	}
+}
+
 // TLSSecretProvider.OnChange handles changing TLS data based on which Kubernetes secret is read
 func (t *TLSSecretProvider) OnChange(secret *corev1.Secret) error {
+	if secret.Name != t.ClientSecretName && secret.Name != t.CASecretName {
+		return nil
+	}
 	var err error
 	logrus.WithFields(logrus.Fields{
 		logfields.SecretName: secret.Name,
@@ -358,8 +401,11 @@ func (t *TLSSecretProvider) OnChange(secret *corev1.Secret) error {
 	case t.CASecretName:
 		err = t.caOnChange(secret)
 	}
+	if err != nil {
+		return err
+	}
 	logrus.Info("Successfully updated TLS configuration to have new data")
-	return err
+	return nil
 }
 
 // TLSSecretProvider.clientOnChange handles changing the client cert from a Kubernetes secret
@@ -394,7 +440,7 @@ func (t *TLSSecretProvider) clientOnChange(secret *corev1.Secret) error {
 		caPool = currentMaterial.CAPool
 	}
 
-	t.Material.Store(&TLSMaterial{
+	t.store(&TLSMaterial{
 		Cert:   cert,
 		CAPool: caPool,
 	})
@@ -452,7 +498,7 @@ func (t *TLSSecretProvider) caOnChange(secret *corev1.Secret) error {
 		cert = currentMaterial.Cert
 	}
 
-	t.Material.Store(&TLSMaterial{
+	t.store(&TLSMaterial{
 		Cert:   cert,
 		CAPool: caPool,
 	})
@@ -502,7 +548,7 @@ func (t *TLSSecretProvider) Reload(ctx context.Context) error {
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
 
-	t.Material.Store(newMaterial)
+	t.store(newMaterial)
 
 	logrus.Info("Successfully reloaded TLS data")
 

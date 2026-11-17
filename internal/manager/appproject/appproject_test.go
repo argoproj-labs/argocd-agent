@@ -16,11 +16,16 @@ package appproject
 
 import (
 	"context"
+	"encoding/json"
+	goerrors "errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	appproject "github.com/argoproj-labs/argocd-agent/internal/backend/kubernetes/appproject"
 	appmock "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
+	"github.com/argoproj-labs/argocd-agent/internal/cache"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
@@ -40,6 +45,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+const testNamespace = "argocd"
 
 func fakeProjManager(t *testing.T, namespace string, objects ...runtime.Object) (*fakeappclient.Clientset, *AppProjectManager) {
 	client := fakeappclient.NewSimpleClientset(objects...)
@@ -62,6 +69,32 @@ func fakeProjManager(t *testing.T, namespace string, objects ...runtime.Object) 
 	return client, am
 }
 
+func newTestAppProject(name string) *v1alpha1.AppProject {
+	return &v1alpha1.AppProject{
+		ObjectMeta: v1.ObjectMeta{Name: name, Namespace: testNamespace, UID: ktypes.UID(name + "-uid")},
+		Spec:       v1alpha1.AppProjectSpec{SourceRepos: []string{"https://example.com/repo.git"}},
+	}
+}
+
+// newExistingAppProject is an AppProject as it exists on the agent, with the
+// source UID annotation that Create adds.
+func newExistingAppProject() *v1alpha1.AppProject {
+	project := newTestAppProject("test-project")
+	project.ResourceVersion = "5"
+	project.Labels = map[string]string{"app": "old"}
+	project.Annotations = map[string]string{manager.SourceUIDAnnotation: "src-1"}
+	project.Spec.SourceRepos = []string{"https://old"}
+	return project
+}
+
+func newMockedManager(t *testing.T, opts ...AppProjectManagerOption) (*appmock.AppProject, *AppProjectManager) {
+	t.Helper()
+	be := appmock.NewAppProject(t)
+	m, err := NewAppProjectManager(be, testNamespace, opts...)
+	require.NoError(t, err)
+	return be, m
+}
+
 func Test_ManagerOptions(t *testing.T) {
 	t.Run("NewManager with default options", func(t *testing.T) {
 		m, err := NewAppProjectManager(nil, "")
@@ -74,6 +107,41 @@ func Test_ManagerOptions(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, m.allowUpsert)
 	})
+}
+
+func Test_NewAppProjectManagerRoleAndMode(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    []AppProjectManagerOption
+		wantErr string
+	}{
+		{
+			name: "a principal without a mode",
+			opts: []AppProjectManagerOption{WithRole(manager.ManagerRolePrincipal)},
+		},
+		{
+			name:    "a principal with a mode is rejected",
+			opts:    []AppProjectManagerOption{WithRole(manager.ManagerRolePrincipal), WithMode(manager.ManagerModeManaged)},
+			wantErr: "mode should be unset when role is principal",
+		},
+		{
+			name: "an agent with a mode",
+			opts: []AppProjectManagerOption{WithRole(manager.ManagerRoleAgent), WithMode(manager.ManagerModeAutonomous)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := NewAppProjectManager(appmock.NewAppProject(t), testNamespace, tt.opts...)
+
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+				require.Nil(t, m)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, m)
+		})
+	}
 }
 
 func Test_DeleteAppProject(t *testing.T) {
@@ -267,6 +335,424 @@ func TestCreateAppProject(t *testing.T) {
 	})
 }
 
+func Test_AppProjectManagerUpsert(t *testing.T) {
+	ctx := context.Background()
+	alreadyExists := errors.NewAlreadyExists(schema.GroupResource{Group: "argoproj.io", Resource: "appprojects"}, "test-project")
+
+	t.Run("creates the project when it does not exist", func(t *testing.T) {
+		created := newTestAppProject("test-project")
+		created.ResourceVersion = "1"
+		var sent *v1alpha1.AppProject
+		be, m := newMockedManager(t)
+		be.EXPECT().Create(ctx, mock.Anything).RunAndReturn(
+			func(_ context.Context, p *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+				sent = p.DeepCopy()
+				return created, nil
+			}).Once()
+
+		got, err := m.Upsert(ctx, newTestAppProject("test-project"))
+
+		require.NoError(t, err)
+		require.Same(t, created, got)
+		require.Equal(t, testNamespace, sent.Namespace)
+		require.Equal(t, "test-project-uid", sent.Annotations[manager.SourceUIDAnnotation])
+		require.True(t, m.IsManaged("test-project"))
+		require.True(t, m.IsChangeIgnored("test-project", "1"))
+	})
+
+	t.Run("updates the existing project when it already exists", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			role      manager.ManagerRole
+			wantStamp bool
+		}{
+			{name: "on the principal the update is stamped", role: manager.ManagerRolePrincipal, wantStamp: true},
+			{name: "on an agent the update is not stamped", role: manager.ManagerRoleAgent, wantStamp: false},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				// The replica assigns its own UID and resource version to the project.
+				existing := newExistingAppProject()
+				existing.UID = "replica-uid"
+				existing.ResourceVersion = "9"
+				existing.Annotations = map[string]string{manager.SourceUIDAnnotation: "stale-from-a-previous-failover"}
+				updated := newExistingAppProject()
+				updated.ResourceVersion = "10"
+				var sent *v1alpha1.AppProject
+				be, m := newMockedManager(t, WithRole(tt.role))
+				be.EXPECT().Create(ctx, mock.Anything).Return(nil, alreadyExists).Once()
+				be.EXPECT().Get(ctx, "test-project", testNamespace).Return(existing, nil).Once()
+				be.EXPECT().Update(ctx, mock.Anything).RunAndReturn(
+					func(_ context.Context, p *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+						sent = p.DeepCopy()
+						return updated, nil
+					}).Once()
+
+				got, err := m.Upsert(ctx, newTestAppProject("test-project"))
+
+				require.NoError(t, err)
+				require.Same(t, updated, got)
+				require.Equal(t, ktypes.UID("replica-uid"), sent.UID)
+				require.Equal(t, "9", sent.ResourceVersion)
+				// The source UID is the one of the primary, not the stale one on the replica.
+				require.Equal(t, "test-project-uid", sent.Annotations[manager.SourceUIDAnnotation])
+				_, stamped := sent.Annotations[LastUpdatedAnnotation]
+				require.Equal(t, tt.wantStamp, stamped)
+				require.True(t, m.IsChangeIgnored("test-project", "10"))
+			})
+		}
+	})
+
+	t.Run("returns the error without going further", func(t *testing.T) {
+		createErr := goerrors.New("create failed")
+		getErr := goerrors.New("get failed")
+		updateErr := goerrors.New("update failed")
+		tests := []struct {
+			name    string
+			expect  func(be *appmock.AppProject)
+			wantErr error
+			wantMsg string
+		}{
+			{
+				name: "create fails with an error other than already exists",
+				expect: func(be *appmock.AppProject) {
+					be.EXPECT().Create(ctx, mock.Anything).Return(nil, createErr).Once()
+				},
+				wantErr: createErr,
+			},
+			{
+				name: "the existing project cannot be fetched",
+				expect: func(be *appmock.AppProject) {
+					be.EXPECT().Create(ctx, mock.Anything).Return(nil, alreadyExists).Once()
+					be.EXPECT().Get(ctx, "test-project", testNamespace).Return(nil, getErr).Once()
+				},
+				wantErr: getErr,
+				wantMsg: "get existing appproject for upsert",
+			},
+			{
+				name: "the update fails",
+				expect: func(be *appmock.AppProject) {
+					be.EXPECT().Create(ctx, mock.Anything).Return(nil, alreadyExists).Once()
+					be.EXPECT().Get(ctx, "test-project", testNamespace).Return(newExistingAppProject(), nil).Once()
+					be.EXPECT().Update(ctx, mock.Anything).Return(nil, updateErr).Once()
+				},
+				wantErr: updateErr,
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				be, m := newMockedManager(t)
+				tt.expect(be)
+
+				got, err := m.Upsert(ctx, newTestAppProject("test-project"))
+
+				require.ErrorIs(t, err, tt.wantErr)
+				if tt.wantMsg != "" {
+					require.ErrorContains(t, err, tt.wantMsg)
+				}
+				require.Nil(t, got)
+			})
+		}
+	})
+}
+
+func Test_AppProjectManagerUpdateAppProject(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("updates the project when the backend does not support patch", func(t *testing.T) {
+		incoming := &v1alpha1.AppProject{
+			ObjectMeta: v1.ObjectMeta{
+				Name:        "test-project",
+				Namespace:   testNamespace,
+				Labels:      map[string]string{"app": "new"},
+				Annotations: map[string]string{"extra": "yes"},
+				Finalizers:  []string{"example.com/finalizer"},
+			},
+			Spec: v1alpha1.AppProjectSpec{SourceRepos: []string{"https://new"}},
+			Status: v1alpha1.AppProjectStatus{
+				JWTTokensByRole: map[string]v1alpha1.JWTTokens{"admin": {Items: []v1alpha1.JWTToken{{ID: "t1"}}}},
+			},
+		}
+		updated := newExistingAppProject()
+		updated.ResourceVersion = "6"
+		var sent *v1alpha1.AppProject
+		be, m := newMockedManager(t)
+		be.EXPECT().Get(ctx, "test-project", testNamespace).Return(newExistingAppProject(), nil).Once()
+		be.EXPECT().SupportsPatch().Return(false)
+		be.EXPECT().Update(ctx, mock.Anything).RunAndReturn(
+			func(_ context.Context, p *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+				sent = p.DeepCopy()
+				return updated, nil
+			}).Once()
+
+		got, err := m.UpdateAppProject(ctx, incoming)
+
+		require.NoError(t, err)
+		require.Same(t, updated, got)
+		require.Equal(t, map[string]string{"app": "new"}, sent.Labels)
+		require.Equal(t, []string{"example.com/finalizer"}, sent.Finalizers)
+		require.Equal(t, []string{"https://new"}, sent.Spec.SourceRepos)
+		require.Equal(t, incoming.Status, sent.Status)
+		// The incoming project is not stamped, so the existing source UID is kept.
+		require.Equal(t, map[string]string{"extra": "yes", manager.SourceUIDAnnotation: "src-1"}, sent.Annotations)
+		require.True(t, m.IsChangeIgnored("test-project", "6"))
+	})
+
+	t.Run("an incoming project that carries its own source UID replaces the existing one", func(t *testing.T) {
+		incoming := newTestAppProject("test-project")
+		incoming.Annotations = map[string]string{manager.SourceUIDAnnotation: "adopted"}
+		var sent *v1alpha1.AppProject
+		be, m := newMockedManager(t)
+		be.EXPECT().Get(ctx, "test-project", testNamespace).Return(newExistingAppProject(), nil).Once()
+		be.EXPECT().SupportsPatch().Return(false)
+		be.EXPECT().Update(ctx, mock.Anything).RunAndReturn(
+			func(_ context.Context, p *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+				sent = p.DeepCopy()
+				return p, nil
+			}).Once()
+
+		_, err := m.UpdateAppProject(ctx, incoming)
+
+		require.NoError(t, err)
+		require.Equal(t, "adopted", sent.Annotations[manager.SourceUIDAnnotation])
+	})
+
+	t.Run("patches the project when the backend supports patch", func(t *testing.T) {
+		incoming := newTestAppProject("test-project")
+		incoming.Labels = map[string]string{"app": "old"}
+		incoming.Spec.SourceRepos = []string{"https://new"}
+		updated := newExistingAppProject()
+		updated.ResourceVersion = "6"
+		var patch []byte
+		be, m := newMockedManager(t)
+		be.EXPECT().Get(ctx, "test-project", testNamespace).Return(newExistingAppProject(), nil).Once()
+		be.EXPECT().SupportsPatch().Return(true)
+		be.EXPECT().Patch(ctx, "test-project", testNamespace, mock.Anything).RunAndReturn(
+			func(_ context.Context, _, _ string, p []byte) (*v1alpha1.AppProject, error) {
+				patch = p
+				return updated, nil
+			}).Once()
+
+		got, err := m.UpdateAppProject(ctx, incoming)
+
+		require.NoError(t, err)
+		require.Same(t, updated, got)
+		// Only the source repositories differ: the source UID annotation of the
+		// existing project was kept in the target, so it is not part of the patch.
+		var operations []struct {
+			Op   string `json:"op"`
+			Path string `json:"path"`
+		}
+		require.NoError(t, json.Unmarshal(patch, &operations))
+		require.NotEmpty(t, operations)
+		for _, operation := range operations {
+			require.True(t, strings.HasPrefix(operation.Path, "/spec/sourceRepos"), "unexpected operation on %s", operation.Path)
+		}
+		require.True(t, m.IsChangeIgnored("test-project", "6"))
+	})
+
+	t.Run("creates the project when it does not exist and upsert is allowed", func(t *testing.T) {
+		created := newTestAppProject("test-project")
+		created.ResourceVersion = "1"
+		be, m := newMockedManager(t, WithAllowUpsert(true))
+		be.EXPECT().Get(ctx, "test-project", testNamespace).
+			Return(nil, errors.NewNotFound(schema.GroupResource{Resource: "appprojects"}, "test-project")).Once()
+		be.EXPECT().Create(ctx, mock.Anything).Return(created, nil).Once()
+
+		got, err := m.UpdateAppProject(ctx, newTestAppProject("test-project"))
+
+		require.NoError(t, err)
+		require.Same(t, created, got)
+		require.True(t, m.IsManaged("test-project"))
+	})
+
+	t.Run("returns an error without writing when the project cannot be fetched", func(t *testing.T) {
+		getErr := goerrors.New("get failed")
+		tests := []struct {
+			name        string
+			allowUpsert bool
+			err         error
+		}{
+			{
+				name: "not found and upsert is not allowed",
+				err:  errors.NewNotFound(schema.GroupResource{Resource: "appprojects"}, "test-project"),
+			},
+			{name: "another error and upsert is allowed", allowUpsert: true, err: getErr},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				be, m := newMockedManager(t, WithAllowUpsert(tt.allowUpsert))
+				be.EXPECT().Get(ctx, "test-project", testNamespace).Return(nil, tt.err).Once()
+
+				got, err := m.UpdateAppProject(ctx, newTestAppProject("test-project"))
+
+				require.ErrorIs(t, err, tt.err)
+				require.ErrorContains(t, err, "error updating app-project test-project")
+				require.Nil(t, got)
+			})
+		}
+	})
+
+	t.Run("a failed write returns the error", func(t *testing.T) {
+		writeErr := goerrors.New("write failed")
+		tests := []struct {
+			name     string
+			patching bool
+			expect   func(be *appmock.AppProject)
+		}{
+			{
+				name:     "patch",
+				patching: true,
+				expect: func(be *appmock.AppProject) {
+					be.EXPECT().Patch(ctx, "test-project", testNamespace, mock.Anything).Return(nil, writeErr).Once()
+				},
+			},
+			{
+				name: "update",
+				expect: func(be *appmock.AppProject) {
+					be.EXPECT().Update(ctx, mock.Anything).Return(nil, writeErr).Once()
+				},
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				be, m := newMockedManager(t)
+				be.EXPECT().Get(ctx, "test-project", testNamespace).Return(newExistingAppProject(), nil).Once()
+				be.EXPECT().SupportsPatch().Return(tt.patching)
+				tt.expect(be)
+
+				got, err := m.UpdateAppProject(ctx, newTestAppProject("test-project"))
+
+				require.ErrorIs(t, err, writeErr)
+				require.Nil(t, got)
+			})
+		}
+	})
+
+	t.Run("retries the update after a conflict", func(t *testing.T) {
+		conflict := errors.NewConflict(schema.GroupResource{Resource: "appprojects"}, "test-project", goerrors.New("the object was modified"))
+		updated := newExistingAppProject()
+		updated.ResourceVersion = "6"
+		be, m := newMockedManager(t)
+		be.EXPECT().Get(ctx, "test-project", testNamespace).RunAndReturn(
+			func(context.Context, string, string) (*v1alpha1.AppProject, error) {
+				return newExistingAppProject(), nil
+			}).Twice()
+		be.EXPECT().SupportsPatch().Return(false)
+		be.EXPECT().Update(ctx, mock.Anything).Return(nil, conflict).Once()
+		be.EXPECT().Update(ctx, mock.Anything).Return(updated, nil).Once()
+
+		got, err := m.UpdateAppProject(ctx, newTestAppProject("test-project"))
+
+		require.NoError(t, err)
+		require.Same(t, updated, got)
+	})
+}
+
+func Test_AppProjectManagerDelete(t *testing.T) {
+	ctx := context.Background()
+	foreground := backend.DeletePropagationForeground
+
+	t.Run("the principal removes the finalizers before deleting", func(t *testing.T) {
+		existing := newExistingAppProject()
+		existing.Finalizers = []string{"resource-finalizer.argoproj.io"}
+		var calls []string
+		var finalizersSent []string
+		be, m := newMockedManager(t, WithRole(manager.ManagerRolePrincipal))
+		be.EXPECT().Get(ctx, "test-project", testNamespace).Return(existing, nil).Once()
+		be.EXPECT().SupportsPatch().Return(false)
+		be.EXPECT().Update(ctx, mock.Anything).RunAndReturn(
+			func(_ context.Context, p *v1alpha1.AppProject) (*v1alpha1.AppProject, error) {
+				calls = append(calls, "update")
+				finalizersSent = p.Finalizers
+				return p, nil
+			}).Once()
+		be.EXPECT().Delete(ctx, "test-project", testNamespace, &foreground).RunAndReturn(
+			func(context.Context, string, string, *backend.DeletionPropagation) error {
+				calls = append(calls, "delete")
+				return nil
+			}).Once()
+
+		err := m.Delete(ctx, newTestAppProject("test-project"), &foreground)
+
+		require.NoError(t, err)
+		require.Equal(t, []string{"update", "delete"}, calls)
+		require.Empty(t, finalizersSent)
+	})
+
+	t.Run("the principal does not delete when the finalizers cannot be removed", func(t *testing.T) {
+		getErr := goerrors.New("get failed")
+		be, m := newMockedManager(t, WithRole(manager.ManagerRolePrincipal))
+		be.EXPECT().Get(ctx, "test-project", testNamespace).Return(nil, getErr).Once()
+
+		err := m.Delete(ctx, newTestAppProject("test-project"), &foreground)
+
+		require.ErrorIs(t, err, getErr)
+		require.ErrorContains(t, err, "error removing finalizer")
+	})
+
+	t.Run("an agent leaves the finalizers alone", func(t *testing.T) {
+		be, m := newMockedManager(t, WithRole(manager.ManagerRoleAgent))
+		be.EXPECT().Delete(ctx, "test-project", testNamespace, &foreground).Return(nil).Once()
+
+		err := m.Delete(ctx, newTestAppProject("test-project"), &foreground)
+
+		require.NoError(t, err)
+	})
+
+	t.Run("returns the error of the backend", func(t *testing.T) {
+		deleteErr := goerrors.New("delete failed")
+		be, m := newMockedManager(t, WithRole(manager.ManagerRoleAgent))
+		be.EXPECT().Delete(ctx, "test-project", testNamespace, (*backend.DeletionPropagation)(nil)).Return(deleteErr).Once()
+
+		err := m.Delete(ctx, newTestAppProject("test-project"), nil)
+
+		require.ErrorIs(t, err, deleteErr)
+	})
+}
+
+func Test_preserveSourceUIDIfUnset(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing map[string]string
+		incoming map[string]string
+		want     map[string]string
+	}{
+		{
+			name:     "keeps the source UID the incoming project carries",
+			existing: map[string]string{manager.SourceUIDAnnotation: "existing"},
+			incoming: map[string]string{manager.SourceUIDAnnotation: "incoming"},
+			want:     map[string]string{manager.SourceUIDAnnotation: "incoming"},
+		},
+		{
+			name:     "copies the existing source UID when the incoming one is empty",
+			existing: map[string]string{manager.SourceUIDAnnotation: "existing"},
+			incoming: map[string]string{manager.SourceUIDAnnotation: "", "keep": "me"},
+			want:     map[string]string{manager.SourceUIDAnnotation: "existing", "keep": "me"},
+		},
+		{
+			name:     "copies the existing source UID when the incoming project has no annotations",
+			existing: map[string]string{manager.SourceUIDAnnotation: "existing"},
+			want:     map[string]string{manager.SourceUIDAnnotation: "existing"},
+		},
+		{
+			name:     "leaves the incoming project alone when the existing one has no source UID",
+			existing: map[string]string{"other": "annotation"},
+			want:     nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			existing := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Annotations: tt.existing}}
+			incoming := &v1alpha1.AppProject{ObjectMeta: v1.ObjectMeta{Annotations: tt.incoming}}
+
+			preserveSourceUIDIfUnset(existing, incoming)
+
+			require.Equal(t, tt.want, incoming.Annotations)
+		})
+	}
+}
+
 func Test_CompareSourceUIDForAppProject(t *testing.T) {
 	oldAppProject := &v1alpha1.AppProject{
 		ObjectMeta: v1.ObjectMeta{
@@ -324,6 +810,18 @@ func Test_CompareSourceUIDForAppProject(t *testing.T) {
 		require.False(t, uidMatch)
 	})
 
+	t.Run("should return the error of the backend when it is not a not found error", func(t *testing.T) {
+		getErr := goerrors.New("get failed")
+		be, m := newMockedManager(t)
+		be.EXPECT().Get(ctx, oldAppProject.Name, oldAppProject.Namespace).Return(nil, getErr).Once()
+
+		exists, uidMatch, err := m.CompareSourceUID(ctx, oldAppProject.DeepCopy())
+
+		require.ErrorIs(t, err, getErr)
+		require.False(t, exists)
+		require.False(t, uidMatch)
+	})
+
 	t.Run("should return False if the appProject doesn't exist", func(t *testing.T) {
 		expectedErr := errors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "appproject"},
 			oldAppProject.Name)
@@ -344,6 +842,132 @@ func Test_CompareSourceUIDForAppProject(t *testing.T) {
 		require.False(t, uidMatch)
 		require.Nil(t, err)
 	})
+}
+
+func Test_AppProjectManagerRevertAppProjectChanges(t *testing.T) {
+	cachedSpec := v1alpha1.AppProjectSpec{SourceRepos: []string{"https://source"}}
+	tamperedSpec := v1alpha1.AppProjectSpec{SourceRepos: []string{"https://tampered"}}
+	cached := map[ktypes.UID]v1alpha1.AppProjectSpec{"src-1": cachedSpec}
+	withSourceUID := map[string]string{manager.SourceUIDAnnotation: "src-1"}
+	updateErr := goerrors.New("update failed")
+
+	// expectUpdate sets up the backend for the update that reverts the spec.
+	expectUpdate := func(result *v1alpha1.AppProject, err error) func(be *appmock.AppProject) {
+		return func(be *appmock.AppProject) {
+			existing := newExistingAppProject()
+			existing.Spec = tamperedSpec
+			be.EXPECT().Get(mock.Anything, "test-project", testNamespace).Return(existing, nil).Once()
+			be.EXPECT().SupportsPatch().Return(false)
+			be.EXPECT().Update(mock.Anything, mock.MatchedBy(func(p *v1alpha1.AppProject) bool {
+				return slices.Equal(p.Spec.SourceRepos, cachedSpec.SourceRepos)
+			})).Return(result, err).Once()
+		}
+	}
+
+	tests := []struct {
+		name        string
+		role        manager.ManagerRole
+		mode        manager.ManagerMode
+		annotations map[string]string
+		cached      map[ktypes.UID]v1alpha1.AppProjectSpec
+		spec        v1alpha1.AppProjectSpec
+		setup       func(be *appmock.AppProject)
+		want        bool
+		wantErr     error
+		wantErrMsg  string
+		wantSpec    *v1alpha1.AppProjectSpec
+	}{
+		{
+			name:     "an autonomous agent never reverts, even without a source UID",
+			role:     manager.ManagerRoleAgent,
+			mode:     manager.ManagerModeAutonomous,
+			cached:   cached,
+			spec:     tamperedSpec,
+			wantSpec: &tamperedSpec,
+		},
+		{
+			name:       "the principal needs a source UID annotation",
+			role:       manager.ManagerRolePrincipal,
+			cached:     cached,
+			spec:       tamperedSpec,
+			wantErrMsg: "source UID annotation not found for resource",
+		},
+		{
+			name:       "a managed agent needs a source UID annotation",
+			role:       manager.ManagerRoleAgent,
+			mode:       manager.ManagerModeManaged,
+			cached:     cached,
+			spec:       tamperedSpec,
+			wantErrMsg: "source UID annotation not found for resource",
+		},
+		{
+			name:        "does nothing when the project is not in the cache",
+			role:        manager.ManagerRoleAgent,
+			mode:        manager.ManagerModeManaged,
+			annotations: withSourceUID,
+			spec:        tamperedSpec,
+			wantSpec:    &tamperedSpec,
+		},
+		{
+			name:        "does nothing when the spec matches the cache",
+			role:        manager.ManagerRoleAgent,
+			mode:        manager.ManagerModeManaged,
+			annotations: withSourceUID,
+			cached:      cached,
+			spec:        cachedSpec,
+			wantSpec:    &cachedSpec,
+		},
+		{
+			name:        "reverts the spec to the cached one",
+			role:        manager.ManagerRoleAgent,
+			mode:        manager.ManagerModeManaged,
+			annotations: withSourceUID,
+			cached:      cached,
+			spec:        tamperedSpec,
+			setup:       expectUpdate(newExistingAppProject(), nil),
+			want:        true,
+			wantSpec:    &cachedSpec,
+		},
+		{
+			name:        "returns the error when the revert cannot be written",
+			role:        manager.ManagerRolePrincipal,
+			annotations: withSourceUID,
+			cached:      cached,
+			spec:        tamperedSpec,
+			setup:       expectUpdate(nil, updateErr),
+			wantErr:     updateErr,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			be, m := newMockedManager(t, WithRole(tt.role), WithMode(tt.mode))
+			if tt.setup != nil {
+				tt.setup(be)
+			}
+			projectCache := cache.NewSourceCache().AppProject
+			for uid, spec := range tt.cached {
+				projectCache.Set(uid, spec)
+			}
+			project := newTestAppProject("test-project")
+			project.Annotations = tt.annotations
+			project.Spec = tt.spec
+
+			got, err := m.RevertAppProjectChanges(context.Background(), project, projectCache)
+
+			require.Equal(t, tt.want, got)
+			switch {
+			case tt.wantErr != nil:
+				require.ErrorIs(t, err, tt.wantErr)
+			case tt.wantErrMsg != "":
+				require.EqualError(t, err, tt.wantErrMsg)
+			default:
+				require.NoError(t, err)
+			}
+			if tt.wantSpec != nil {
+				require.Equal(t, *tt.wantSpec, project.Spec)
+			}
+		})
+	}
 }
 
 func TestDoesAgentMatchWithProject(t *testing.T) {
@@ -535,6 +1159,19 @@ func TestDoesAgentMatchWithProject(t *testing.T) {
 				Spec: v1alpha1.AppProjectSpec{
 					Destinations: []v1alpha1.ApplicationDestination{
 						{Name: "other-agent", Namespace: "default"},
+					},
+				},
+			},
+			want:       false,
+			dstMapping: true,
+		},
+		{
+			name:      "server URL that cannot be parsed is ignored",
+			agentName: "agent-prod",
+			appProject: v1alpha1.AppProject{
+				Spec: v1alpha1.AppProjectSpec{
+					Destinations: []v1alpha1.ApplicationDestination{
+						{Server: "://not-a-url"},
 					},
 				},
 			},
@@ -933,6 +1570,38 @@ func TestAgentSpecificAppProject(t *testing.T) {
 					Roles:            []v1alpha1.ProjectRole{},
 				},
 			},
+		},
+		{
+			name:       "server-only destination with a wildcard server is kept",
+			dstMapping: true,
+			mode:       types.AgentModeAutonomous,
+			agent:      "agent-prod",
+			appProject: v1alpha1.AppProject{Spec: v1alpha1.AppProjectSpec{Destinations: []v1alpha1.ApplicationDestination{{Server: "*", Namespace: "apps"}}}},
+			want:       v1alpha1.AppProject{Spec: v1alpha1.AppProjectSpec{Destinations: []v1alpha1.ApplicationDestination{{Name: "in-cluster", Server: "https://kubernetes.default.svc", Namespace: "apps"}}}},
+		},
+		{
+			name:       "server-only destination whose agentName matches is kept",
+			dstMapping: true,
+			mode:       types.AgentModeAutonomous,
+			agent:      "agent-prod",
+			appProject: v1alpha1.AppProject{Spec: v1alpha1.AppProjectSpec{Destinations: []v1alpha1.ApplicationDestination{{Server: "https://rp.example.com:9090?agentName=agent-prod", Namespace: "apps"}}}},
+			want:       v1alpha1.AppProject{Spec: v1alpha1.AppProjectSpec{Destinations: []v1alpha1.ApplicationDestination{{Name: "in-cluster", Server: "https://kubernetes.default.svc", Namespace: "apps"}}}},
+		},
+		{
+			name:       "server-only destination whose agentName is another agent is dropped",
+			dstMapping: true,
+			mode:       types.AgentModeAutonomous,
+			agent:      "agent-prod",
+			appProject: v1alpha1.AppProject{Spec: v1alpha1.AppProjectSpec{Destinations: []v1alpha1.ApplicationDestination{{Server: "https://rp.example.com:9090?agentName=other"}}}},
+			want:       v1alpha1.AppProject{Spec: v1alpha1.AppProjectSpec{Destinations: []v1alpha1.ApplicationDestination{}}},
+		},
+		{
+			name:       "server-only destination with a server URL that cannot be parsed is dropped",
+			dstMapping: true,
+			mode:       types.AgentModeAutonomous,
+			agent:      "agent-prod",
+			appProject: v1alpha1.AppProject{Spec: v1alpha1.AppProjectSpec{Destinations: []v1alpha1.ApplicationDestination{{Server: "://not-a-url"}}}},
+			want:       v1alpha1.AppProject{Spec: v1alpha1.AppProjectSpec{Destinations: []v1alpha1.ApplicationDestination{}}},
 		},
 	}
 
