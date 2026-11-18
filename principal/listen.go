@@ -24,8 +24,6 @@ import (
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -193,9 +191,15 @@ func (s *Server) serveGRPC(ctx context.Context, metrics *metrics.PrincipalMetric
 		opts := []grpchttp1server.Option{grpchttp1server.PreferGRPCWeb(true)}
 
 		downgradingHandler := grpchttp1server.CreateDowngradingHandler(s.grpcServer, http.NotFoundHandler(), opts...)
+		protocols := new(http.Protocols)
+		protocols.SetHTTP1(true)
+		protocols.SetHTTP2(true)
+		// Support h2c only when plaintext mode was explicitly configured.
+		protocols.SetUnencryptedHTTP2(tlsConfig == nil)
 		downgradingServer := &http.Server{
 			TLSConfig: tlsConfig,
-			Handler:   h2c.NewHandler(downgradingHandler, &http2.Server{}),
+			Handler:   downgradingHandler,
+			Protocols: protocols,
 		}
 
 		go func() {
