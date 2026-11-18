@@ -610,6 +610,39 @@ func init() {
 	logrus.SetLevel(logrus.TraceLevel)
 }
 
+// waitClosed waits for ch with a local deadline, so a test that wedges fails
+// with its own message instead of running into the package timeout.
+func waitClosed(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("%s did not happen within 3s", what)
+	}
+}
+
+// subscribeStream returns a stream for agentName whose Recv blocks until the
+// returned release is called, and a release that is safe to call more than
+// once. Release is also registered as cleanup, so a failing assertion cannot
+// leave the Subscribe goroutine parked in its Recv hook.
+func subscribeStream(t *testing.T, agentName string) (*mock.MockEventServer, func()) {
+	t.Helper()
+	gate := make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(gate) }) }
+	t.Cleanup(release)
+
+	st := &mock.MockEventServer{
+		AgentName: agentName,
+		AgentMode: string(types.AgentModeManaged),
+	}
+	st.AddRecvHook(func(_ *mock.MockEventServer) error {
+		<-gate
+		return io.EOF
+	})
+	return st, release
+}
+
 // An agent that connects while the principal still holds its previous stream
 // must preempt that previous client.
 func TestSubscribe_PreemptsPreviousClientForSameAgent(t *testing.T) {
@@ -620,27 +653,14 @@ func TestSubscribe_PreemptsPreviousClientForSameAgent(t *testing.T) {
 
 	connectedBefore := testutil.ToFloat64(testMetrics.AgentConnected)
 
-	// Both streams belong to the same agent, as they would on a reconnect.
-	newStream := func() (*mock.MockEventServer, chan struct{}) {
-		gate := make(chan struct{})
-		st := &mock.MockEventServer{
-			AgentName: "agent-p",
-			AgentMode: string(types.AgentModeManaged),
-		}
-		st.AddRecvHook(func(_ *mock.MockEventServer) error {
-			<-gate
-			return io.EOF
-		})
-		return st, gate
-	}
-
 	activeClient := func() *client {
 		s.activeClientsMu.Lock()
 		defer s.activeClientsMu.Unlock()
 		return s.activeClients["agent-p"]
 	}
 
-	first, firstGate := newStream()
+	// Both streams belong to the same agent, as they would on a reconnect.
+	first, releaseFirst := subscribeStream(t, "agent-p")
 	firstReturned := make(chan struct{})
 	go func() {
 		_ = s.Subscribe(first)
@@ -654,7 +674,7 @@ func TestSubscribe_PreemptsPreviousClientForSameAgent(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 
 	// The agent reconnects while the first stream is still held.
-	second, secondGate := newStream()
+	second, releaseSecond := subscribeStream(t, "agent-p")
 	secondReturned := make(chan struct{})
 	go func() {
 		_ = s.Subscribe(second)
@@ -663,22 +683,11 @@ func TestSubscribe_PreemptsPreviousClientForSameAgent(t *testing.T) {
 
 	// The previous client must be canceled, so its goroutines (including its
 	// SendWaitingEvents loop) wind down.
-	select {
-	case <-firstClient.ctx.Done():
-	case <-time.After(3 * time.Second):
-		close(firstGate)
-		close(secondGate)
-		t.Fatal("a reconnect did not cancel the previous client within 3s")
-	}
+	waitClosed(t, firstClient.ctx.Done(), "the reconnect canceling the previous client")
 
 	// Releasing the first stream's Recv lets its Subscribe return.
-	close(firstGate)
-	select {
-	case <-firstReturned:
-	case <-time.After(3 * time.Second):
-		close(secondGate)
-		t.Fatal("the preempted Subscribe did not return within 3s")
-	}
+	releaseFirst()
+	waitClosed(t, firstReturned, "the preempted Subscribe returning")
 
 	// A preempted client must give back the gauge it incremented, and no more.
 	// The replacing client cancels its predecessor before it increments the
@@ -699,8 +708,8 @@ func TestSubscribe_PreemptsPreviousClientForSameAgent(t *testing.T) {
 	// it is connected, on the new stream.
 	assert.NotContains(t, statusUpdater.statusesFor("agent-p"), v1alpha1.ConnectionStatusFailed)
 
-	close(secondGate)
-	<-secondReturned
+	releaseSecond()
+	waitClosed(t, secondReturned, "the active Subscribe returning")
 }
 
 // The event writer's target must follow the active client: after a reconnect,
@@ -713,26 +722,13 @@ func TestSubscribe_EventWriterTargetFollowsTheActiveClient(t *testing.T) {
 	qs.Create("agent-t")
 	s := NewServer(qs, event.NewEventWritersMap(), testMetrics, statusUpdater)
 
-	newStream := func() (*mock.MockEventServer, chan struct{}) {
-		gate := make(chan struct{})
-		st := &mock.MockEventServer{
-			AgentName: "agent-t",
-			AgentMode: string(types.AgentModeManaged),
-		}
-		st.AddRecvHook(func(_ *mock.MockEventServer) error {
-			<-gate
-			return io.EOF
-		})
-		return st, gate
-	}
-
 	activeClient := func() *client {
 		s.activeClientsMu.Lock()
 		defer s.activeClientsMu.Unlock()
 		return s.activeClients["agent-t"]
 	}
 
-	first, firstGate := newStream()
+	first, releaseFirst := subscribeStream(t, "agent-t")
 	firstReturned := make(chan struct{})
 	go func() {
 		_ = s.Subscribe(first)
@@ -745,7 +741,7 @@ func TestSubscribe_EventWriterTargetFollowsTheActiveClient(t *testing.T) {
 		return firstClient != nil
 	}, time.Second, 10*time.Millisecond)
 
-	second, secondGate := newStream()
+	second, releaseSecond := subscribeStream(t, "agent-t")
 	secondReturned := make(chan struct{})
 	go func() {
 		_ = s.Subscribe(second)
@@ -754,15 +750,9 @@ func TestSubscribe_EventWriterTargetFollowsTheActiveClient(t *testing.T) {
 
 	// Let the preempted connection finish tearing down, so any send it still
 	// had in flight would have landed by the time we check.
-	select {
-	case <-firstClient.ctx.Done():
-	case <-time.After(3 * time.Second):
-		close(firstGate)
-		close(secondGate)
-		t.Fatal("a reconnect did not cancel the previous client within 3s")
-	}
-	close(firstGate)
-	<-firstReturned
+	waitClosed(t, firstClient.ctx.Done(), "the reconnect canceling the previous client")
+	releaseFirst()
+	waitClosed(t, firstReturned, "the preempted Subscribe returning")
 
 	emitter := event.NewEventSource("test")
 	qs.SendQ("agent-t").Add(emitter.ApplicationEvent(
@@ -776,6 +766,6 @@ func TestSubscribe_EventWriterTargetFollowsTheActiveClient(t *testing.T) {
 	assert.Equal(t, uint32(0), first.NumSent.Load(),
 		"the replaced stream must never be written to")
 
-	close(secondGate)
-	<-secondReturned
+	releaseSecond()
+	waitClosed(t, secondReturned, "the active Subscribe returning")
 }

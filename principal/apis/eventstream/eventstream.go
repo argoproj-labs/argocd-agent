@@ -438,6 +438,10 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	previous := s.activeClients[c.agentName]
 	s.activeClients[c.agentName] = c
 
+	if s.metrics != nil {
+		metrics.SetAgentConnectionTime(c.agentName, c.start)
+	}
+
 	if previous != nil && previous != c {
 		previous.cancelFn()
 	}
@@ -473,9 +477,6 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 
 		// increase counter to track how many times an agent has connected/reconnected to principal
 		s.metrics.AgentConnectionCount.WithLabelValues(c.agentName).Inc()
-
-		// store connection time to find average connection time of all agents
-		metrics.SetAgentConnectionTime(c.agentName, c.start)
 	}
 
 	go eventWriter.SendWaitingEvents(c.ctx)
@@ -574,6 +575,12 @@ func (s *Server) DisconnectAll() {
 	s.activeClientsMu.Lock()
 	clients := s.activeClients
 	s.activeClients = make(map[string]*client)
+
+	if s.metrics != nil {
+		for name := range clients {
+			metrics.DeleteAgentConnectionTime(name)
+		}
+	}
 	s.activeClientsMu.Unlock()
 
 	for name, c := range clients {
@@ -594,6 +601,10 @@ func (s *Server) DisconnectAgent(agentName string) bool {
 		return false
 	}
 	delete(s.activeClients, agentName)
+
+	if s.metrics != nil {
+		metrics.DeleteAgentConnectionTime(agentName)
+	}
 	s.activeClientsMu.Unlock()
 
 	s.clusterMgr.SetAgentConnectionStatus(agentName, v1alpha1.ConnectionStatusFailed, time.Now())
