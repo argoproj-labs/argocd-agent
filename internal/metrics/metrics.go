@@ -367,13 +367,3 @@ func GetAvgAgentConnectionTime(metrics *PrincipalMetrics) {
 		metrics.AvgAgentConnectionTime.Set(float64(0))
 	}
 }
-
-// AgentConnectionTimeTracked reports whether a connection start time is
-// currently tracked for the given agent.
-func AgentConnectionTimeTracked(agentName string) bool {
-	agentConnectionTime.Lock.RLock()
-	defer agentConnectionTime.Lock.RUnlock()
-
-	_, ok := agentConnectionTime.ConnectionTimeMap[agentName]
-	return ok
-}

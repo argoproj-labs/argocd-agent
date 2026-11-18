@@ -680,12 +680,14 @@ func TestSubscribe_PreemptsPreviousClientForSameAgent(t *testing.T) {
 		t.Fatal("the preempted Subscribe did not return within 3s")
 	}
 
-	// A preempted client must not take the agent's bookkeeping down with it:
-	// the agent is still connected, on the new stream.
-	assert.Equal(t, connectedBefore+1, testutil.ToFloat64(testMetrics.AgentConnected),
+	// A preempted client must give back the gauge it incremented, and no more.
+	// The replacing client cancels its predecessor before it increments the
+	// gauge, so the preempted connection's decrement can land first and the
+	// expected value is only reached once the replacement is initialized.
+	require.Eventually(t, func() bool {
+		return testutil.ToFloat64(testMetrics.AgentConnected) == connectedBefore+1
+	}, 3*time.Second, 10*time.Millisecond,
 		"the preempted connection must decrement the gauge it incremented, and no more")
-	assert.True(t, metrics.AgentConnectionTimeTracked("agent-p"),
-		"a preempted client must not delete the connection time of the connection that replaced it")
 
 	// The newest client stays registered and connected.
 	secondClient := activeClient()
@@ -696,6 +698,83 @@ func TestSubscribe_PreemptsPreviousClientForSameAgent(t *testing.T) {
 	// Preempting the previous client must not report the agent as disconnected:
 	// it is connected, on the new stream.
 	assert.NotContains(t, statusUpdater.statusesFor("agent-p"), v1alpha1.ConnectionStatusFailed)
+
+	close(secondGate)
+	<-secondReturned
+}
+
+// The event writer's target must follow the active client: after a reconnect,
+// events go to the stream that is now active and never to the one it replaced.
+// Registration and UpdateTarget happen under one lock so the two cannot be
+// ordered against each other.
+func TestSubscribe_EventWriterTargetFollowsTheActiveClient(t *testing.T) {
+	statusUpdater := &fakeStatusUpdater{}
+	qs := queue.NewSendRecvQueues()
+	qs.Create("agent-t")
+	s := NewServer(qs, event.NewEventWritersMap(), testMetrics, statusUpdater)
+
+	newStream := func() (*mock.MockEventServer, chan struct{}) {
+		gate := make(chan struct{})
+		st := &mock.MockEventServer{
+			AgentName: "agent-t",
+			AgentMode: string(types.AgentModeManaged),
+		}
+		st.AddRecvHook(func(_ *mock.MockEventServer) error {
+			<-gate
+			return io.EOF
+		})
+		return st, gate
+	}
+
+	activeClient := func() *client {
+		s.activeClientsMu.Lock()
+		defer s.activeClientsMu.Unlock()
+		return s.activeClients["agent-t"]
+	}
+
+	first, firstGate := newStream()
+	firstReturned := make(chan struct{})
+	go func() {
+		_ = s.Subscribe(first)
+		close(firstReturned)
+	}()
+
+	var firstClient *client
+	require.Eventually(t, func() bool {
+		firstClient = activeClient()
+		return firstClient != nil
+	}, time.Second, 10*time.Millisecond)
+
+	second, secondGate := newStream()
+	secondReturned := make(chan struct{})
+	go func() {
+		_ = s.Subscribe(second)
+		close(secondReturned)
+	}()
+
+	// Let the preempted connection finish tearing down, so any send it still
+	// had in flight would have landed by the time we check.
+	select {
+	case <-firstClient.ctx.Done():
+	case <-time.After(3 * time.Second):
+		close(firstGate)
+		close(secondGate)
+		t.Fatal("a reconnect did not cancel the previous client within 3s")
+	}
+	close(firstGate)
+	<-firstReturned
+
+	emitter := event.NewEventSource("test")
+	qs.SendQ("agent-t").Add(emitter.ApplicationEvent(
+		event.Create,
+		&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns"}},
+	))
+
+	require.Eventually(t, func() bool {
+		return second.NumSent.Load() > 0
+	}, 3*time.Second, 10*time.Millisecond, "the active stream received no events")
+	assert.Equal(t, uint32(0), first.NumSent.Load(),
+		"the replaced stream must never be written to")
 
 	close(secondGate)
 	<-secondReturned

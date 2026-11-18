@@ -378,9 +378,9 @@ func (ew *EventWriter) retrySentEvent(resID string, sentMsg *eventMessage) {
 		return
 	}
 
-	err = target.Send(&eventstreamapi.Event{Event: pev})
 	sentMsg.mu.Unlock()
 
+	err = target.Send(&eventstreamapi.Event{Event: pev})
 	if err != nil {
 		logCtx.Errorf("Error while sending: %v\n", err)
 		return
