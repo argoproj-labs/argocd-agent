@@ -442,6 +442,51 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		require.Equal(t, incoming.Operation, updated.Operation)
 	})
 
+	t.Run("Add the refresh annotation reported by the agent", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			existing map[string]string
+			want     map[string]string
+		}{
+			{
+				name: "to an application without annotations",
+				want: map[string]string{"argocd.argoproj.io/refresh": "normal"},
+			},
+			{
+				name:     "next to the annotations the application already has",
+				existing: map[string]string{"bar": "foo"},
+				want:     map[string]string{"bar": "foo", "argocd.argoproj.io/refresh": "normal"},
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				existing := &v1alpha1.Application{
+					ObjectMeta: v1.ObjectMeta{Name: "foobar", Namespace: "cluster-1", Annotations: tt.existing},
+				}
+				incoming := &v1alpha1.Application{
+					ObjectMeta: v1.ObjectMeta{
+						Name:        "foobar",
+						Namespace:   "argocd",
+						Annotations: map[string]string{"argocd.argoproj.io/refresh": "normal"},
+					},
+					Status: v1alpha1.ApplicationStatus{
+						Sync: v1alpha1.SyncStatus{Status: v1alpha1.SyncStatusCodeOutOfSync},
+					},
+				}
+				appC, ai := fakeInformer(t, "", existing)
+				be := application.NewKubernetesBackend(appC, "", ai, true)
+				mgr, err := NewApplicationManager(be, "argocd", WithRole(manager.ManagerRolePrincipal))
+				require.NoError(t, err)
+
+				updated, err := mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
+
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, updated.Annotations)
+				assert.Equal(t, v1alpha1.SyncStatusCodeOutOfSync, updated.Status.Sync.Status)
+			})
+		}
+	})
+
 	t.Run("Retain principal-owned annotations across an agent status update", func(t *testing.T) {
 		incoming := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
