@@ -1202,6 +1202,21 @@ func (s *Server) sendCurrentStateToAgent(agentParam types.Agent) error {
 		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to get GPG key ConfigMap: %w", err)
 		}
+
+		// The ConfigMap may have been deleted on the principal before this
+		// agent ever connected, in which case the agent never received a
+		// delete event for it. Send a delete event so the agent removes
+		// any stale copy it may still have.
+		deletedGPGKeyCM := &corev1.ConfigMap{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      common.ArgoCDGPGKeysConfigMapName,
+				Namespace: s.namespace,
+			},
+		}
+		ev := s.events.GPGKeyEvent(event.Delete, deletedGPGKeyCM)
+		tracing.PopulateSpanFromObject(span, deletedGPGKeyCM)
+		tracing.InjectTraceContext(ctx, ev)
+		sendQ.Add(ev)
 	} else if !hasSkipSyncLabel(gpgKeyCM.Labels) {
 		ev := s.events.GPGKeyEvent(event.SpecUpdate, gpgKeyCM)
 		tracing.PopulateSpanFromObject(span, gpgKeyCM)
