@@ -306,6 +306,32 @@ subjects:
 EOF
 ```
 
+### Extending RBAC with the Helm Chart
+
+If you install the agent with the `argocd-agent-agent` Helm chart, you can grant additional permissions through chart values. For each value that is set, the chart creates a dedicated Role or ClusterRole and binds it to the agent's ServiceAccount. The default Role and ClusterRole are not modified. Both values are empty by default, so no extra resources are created unless you set them.
+
+| Value | Creates | Scope |
+|-------|---------|-------|
+| `rbac.extraClusterRules` | `ClusterRole` and `ClusterRoleBinding` | Cluster-wide. Requires `rbac.create=true` and `rbac.createClusterRole=true`. |
+| `rbac.extraRules` | `Role` and `RoleBinding` | The agent's namespace. Requires `rbac.create=true`. |
+
+Each entry is a standard RBAC `PolicyRule`. Both values apply to managed and autonomous agents.
+
+The following example grants cluster-wide read access to resources commonly shown in the Argo CD UI, without adding cluster-wide access to Secrets. The default Role still grants access to Secrets in the agent's own namespace:
+
+```yaml
+rbac:
+  extraClusterRules:
+    - apiGroups: [""]
+      resources: ["pods", "pods/log", "services", "endpoints", "configmaps", "serviceaccounts", "persistentvolumeclaims", "events"]
+      verbs: ["get", "list", "watch"]
+    - apiGroups: ["apps"]
+      resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+      verbs: ["get", "list", "watch"]
+```
+
+Alternatively, bind the built-in `view` ClusterRole to the agent's ServiceAccount. The default `view` rules exclude Secrets, but the role aggregates rules from other ClusterRoles, which may grant Secret access. Inspect the effective rules (`kubectl get clusterrole view -o yaml`) before binding it.
+
 ### Security Considerations for Enhanced RBAC
 
 While enhanced RBAC enables full resource proxy functionality, consider these security implications:
