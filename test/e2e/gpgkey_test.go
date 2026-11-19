@@ -409,19 +409,17 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_DeletedWhilePrincipalDown() {
 		return err == nil && cm.Annotations[manager.SourceUIDAnnotation] == string(sourceGPGKeys.UID)
 	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be pushed to managed-agent")
 
-	// Stop the principal so that the upcoming deletion is never observed by its
-	// informer and no delete event is emitted to the agent.
-	requires.NoError(fixture.StopProcess(fixture.PrincipalName, suite.T()))
-	requires.Eventually(func() bool {
-		return !fixture.IsProcessRunning(fixture.PrincipalName, suite.T())
-	}, 30*time.Second, 1*time.Second)
-	// Always bring the principal back, even if an assertion below fails.
 	defer func() {
 		if !fixture.IsProcessRunning(fixture.PrincipalName, suite.T()) {
 			requires.NoError(fixture.StartProcess(fixture.PrincipalName, suite.T()))
 			fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
 		}
 	}()
+
+	requires.NoError(fixture.StopProcess(fixture.PrincipalName, suite.T()))
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning(fixture.PrincipalName, suite.T())
+	}, 30*time.Second, 1*time.Second)
 
 	// Delete the ConfigMap on the principal's cluster while the principal is down.
 	requires.NoError(suite.PrincipalClient.Delete(suite.Ctx, &sourceGPGKeys, metav1.DeleteOptions{}))

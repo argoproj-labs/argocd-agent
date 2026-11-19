@@ -2501,11 +2501,11 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		require.Equal(t, string(newCM.UID), latestCM.Annotations[manager.SourceUIDAnnotation])
 	})
 
-	t.Run("Delete: GPG key with matching UID must be deleted", func(t *testing.T) {
+	t.Run("Delete: Old GPG key must be deleted", func(t *testing.T) {
 		a, be := createAgent(t)
 
 		oldCM.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: string(incomingCM.UID),
+			manager.SourceUIDAnnotation: "old_uid",
 		}
 		a.gpgKeyManager.Manage(oldCM.Name)
 		defer a.gpgKeyManager.ClearManaged()
@@ -2527,35 +2527,6 @@ func Test_ProcessIncomingGPGKey(t *testing.T) {
 		}
 		require.Equal(t, expectedCalls, gotCalls)
 		require.False(t, a.gpgKeyManager.IsManaged(incomingCM.Name))
-	})
-
-	t.Run("Delete: stale delete with mismatched UID must not remove a recreated GPG key", func(t *testing.T) {
-		a, be := createAgent(t)
-
-		// The locally-managed copy was already recreated with a different
-		// source UID than the one this delete event targets.
-		oldCM.Annotations = map[string]string{
-			manager.SourceUIDAnnotation: "old_uid",
-		}
-		a.gpgKeyManager.Manage(oldCM.Name)
-		defer a.gpgKeyManager.ClearManaged()
-
-		getMock := be.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldCM, nil)
-		defer getMock.Unset()
-
-		// Create a delete event targeting "new_uid", which no longer matches
-		// the locally-managed copy's recorded source UID ("old_uid").
-		ev := event.New(evs.GPGKeyEvent(event.Delete, incomingCM), targets.GPGKey)
-		err := a.processIncomingGPGKey(ev)
-		require.Nil(t, err)
-
-		expectedCalls := []string{"Get"}
-		gotCalls := []string{}
-		for _, call := range be.Calls {
-			gotCalls = append(gotCalls, call.Method)
-		}
-		require.Equal(t, expectedCalls, gotCalls)
-		require.True(t, a.gpgKeyManager.IsManaged(oldCM.Name))
 	})
 
 	t.Run("Unknown event type should not do anything", func(t *testing.T) {

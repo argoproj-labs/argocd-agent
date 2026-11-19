@@ -618,3 +618,35 @@ func TestEventWriter_GPGKeyDeleteThenRecreateStayOrdered(t *testing.T) {
 	require.Equal(t, Delete.String(), eq.items[0].event.Type(), "delete must be delivered first")
 	require.Equal(t, Create.String(), eq.items[1].event.Type(), "recreate must be delivered after the delete")
 }
+
+func TestEventWriter_GPGKeyDeleteCreateDeleteCollapsesToDelete(t *testing.T) {
+	es := NewEventSource("test")
+	eventWriterLogger := logrus.StandardLogger().WithField("module", "EventWriter")
+	name := "argocd-gpg-keys-cm"
+
+	fs := &fakeStream{}
+	evSender := NewEventWriter("test", fs, eventWriterLogger)
+
+	deleteA := es.GPGKeyEvent(Delete, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd", UID: "uid-a"},
+	})
+	createB := es.GPGKeyEvent(Create, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd", UID: "uid-b", ResourceVersion: "2"},
+	})
+	deleteB := es.GPGKeyEvent(Delete, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd", UID: "uid-b"},
+	})
+
+	evSender.Add(deleteA)
+	evSender.Add(createB)
+	evSender.Add(deleteB)
+
+	resID := ResourceID(deleteA)
+	require.Equal(t, name, resID)
+
+	eq, ok := evSender.unsentEvents[resID]
+	require.True(t, ok)
+	require.Len(t, eq.items, 1, "a trailing delete collapses the queue to a single delete")
+	require.Equal(t, Delete.String(), eq.items[0].event.Type())
+	require.Equal(t, EventID(deleteB), EventID(eq.items[0].event), "the surviving event is the latest delete")
+}

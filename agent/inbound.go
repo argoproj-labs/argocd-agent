@@ -1350,13 +1350,6 @@ func (a *Agent) processIncomingGPGKey(ev *event.Event) error {
 		}
 
 	case event.Delete:
-		// A delete event always carries the source UID of the copy it intends to remove.
-		// If the local copy has different source UID it must not remove the resource.
-		if exists && incomingCM.UID != "" && !sourceUIDMatch {
-			logCtx.Debug("Ignoring stale GPG key delete event: local copy has a different source UID")
-			return nil
-		}
-
 		err = a.deleteGPGKey(incomingCM)
 		if err != nil {
 			logging.LogActionError(logCtx, "gpgkey", "delete", incomingCM, err)
