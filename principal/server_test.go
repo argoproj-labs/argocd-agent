@@ -21,6 +21,7 @@ import (
 	"math/big"
 	"os"
 	"path"
+	"reflect"
 	"testing"
 	"time"
 
@@ -276,6 +277,39 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, s)
 		assert.Equal(t, "custom-proxy:8443", s.options.resourceProxyAddress)
+	})
+}
+
+func Test_handleRedisProxyOnConnect(t *testing.T) {
+	agent := types.NewAgent("test", types.AgentModeManaged.String())
+
+	t.Run("is the first handler to run when an agent connects", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithGeneratedTokenSigningKey(),
+		)
+		require.NoError(t, err)
+		require.NotEmpty(t, s.handlersOnConnect)
+		assert.Equal(t,
+			reflect.ValueOf(s.handleRedisProxyOnConnect).Pointer(),
+			reflect.ValueOf(s.handlersOnConnect[0]).Pointer())
+	})
+
+	t.Run("is a no-op for an agent without subscribed connections", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithGeneratedTokenSigningKey(),
+		)
+		require.NoError(t, err)
+		assert.NoError(t, s.handleRedisProxyOnConnect(agent))
+	})
+
+	t.Run("is a no-op when the redis proxy is disabled", func(t *testing.T) {
+		s, err := NewServer(context.TODO(), kube.NewKubernetesFakeClientWithApps(testNamespace), testNamespace,
+			WithGeneratedTokenSigningKey(),
+			WithRedisProxyDisabled(),
+		)
+		require.NoError(t, err)
+		require.Nil(t, s.redisProxy)
+		assert.NoError(t, s.handleRedisProxyOnConnect(agent))
 	})
 }
 
