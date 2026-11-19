@@ -29,6 +29,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/eventstreamapi"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -583,4 +584,37 @@ func (fs *fakeStream) Send(event *eventstreamapi.Event) error {
 
 func (fs *fakeStream) Context() context.Context {
 	return context.Background()
+}
+
+func TestEventWriter_GPGKeyDeleteThenRecreateStayOrdered(t *testing.T) {
+	es := NewEventSource("test")
+	eventWriterLogger := logrus.StandardLogger().WithField("module", "EventWriter")
+	name := "argocd-gpg-keys-cm"
+
+	fs := &fakeStream{}
+	evSender := NewEventWriter("test", fs, eventWriterLogger)
+
+	// Enqueue order mirrors the principal: the synthetic delete is produced
+	// first, then the recreate is observed.
+	deleteEv := es.GPGKeyEvent(Delete, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd"},
+	})
+	recreateEv := es.GPGKeyEvent(Create, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd", UID: "new-uid", ResourceVersion: "2"},
+	})
+
+	evSender.Add(deleteEv)
+	evSender.Add(recreateEv)
+
+	// Both events must share the same (name-based) resource ID, so they live in
+	// a single FIFO queue rather than two independently-shuffled ones.
+	resID := ResourceID(deleteEv)
+	require.Equal(t, name, resID)
+	require.Equal(t, resID, ResourceID(recreateEv))
+
+	eq, ok := evSender.unsentEvents[resID]
+	require.True(t, ok, "both GPG events should be tracked under a single resource ID")
+	require.Len(t, eq.items, 2, "the recreate must be queued after the delete, not replace or coalesce with it")
+	require.Equal(t, Delete.String(), eq.items[0].event.Type(), "delete must be delivered first")
+	require.Equal(t, Create.String(), eq.items[1].event.Type(), "recreate must be delivered after the delete")
 }

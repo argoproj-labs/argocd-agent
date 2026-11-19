@@ -650,16 +650,18 @@ func TestEventSource_resourceEvents(t *testing.T) {
 	meta := metav1.ObjectMeta{Name: "obj", Namespace: "ns", UID: ktypes.UID("uid-1"), ResourceVersion: "7"}
 
 	tests := []struct {
-		name      string
-		evType    EventType
-		target    targets.EventTarget
-		build     func() *cloudevents.Event
-		roundTrip func(t *testing.T, ev *Event)
+		name           string
+		evType         EventType
+		target         targets.EventTarget
+		wantResourceID string
+		build          func() *cloudevents.Event
+		roundTrip      func(t *testing.T, ev *Event)
 	}{
 		{
-			name:   "appproject",
-			evType: Create,
-			target: targets.AppProject,
+			name:           "appproject",
+			evType:         Create,
+			target:         targets.AppProject,
+			wantResourceID: "obj_uid-1",
 			build: func() *cloudevents.Event {
 				return evs.AppProjectEvent(Create, &v1alpha1.AppProject{ObjectMeta: meta})
 			},
@@ -670,9 +672,10 @@ func TestEventSource_resourceEvents(t *testing.T) {
 			},
 		},
 		{
-			name:   "repository",
-			evType: SpecUpdate,
-			target: targets.Repository,
+			name:           "repository",
+			evType:         SpecUpdate,
+			target:         targets.Repository,
+			wantResourceID: "obj_uid-1",
 			build: func() *cloudevents.Event {
 				return evs.RepositoryEvent(SpecUpdate, &corev1.Secret{ObjectMeta: meta})
 			},
@@ -686,6 +689,9 @@ func TestEventSource_resourceEvents(t *testing.T) {
 			name:   "gpgkey",
 			evType: Delete,
 			target: targets.GPGKey,
+			// The GPG keys ConfigMap is a singleton, so its resource ID is
+			// keyed by name only (no UID) to keep delete/recreate ordered.
+			wantResourceID: "obj",
 			build: func() *cloudevents.Event {
 				return evs.GPGKeyEvent(Delete, &corev1.ConfigMap{ObjectMeta: meta})
 			},
@@ -707,12 +713,34 @@ func TestEventSource_resourceEvents(t *testing.T) {
 			require.Equal(t, tt.target.String(), cev.DataSchema())
 			require.Equal(t, "ns/obj", cev.Subject())
 			require.Equal(t, "obj_uid-1_7", EventID(cev))
-			require.Equal(t, "obj_uid-1", ResourceID(cev))
+			require.Equal(t, tt.wantResourceID, ResourceID(cev))
 			require.Equal(t, tt.target, Target(cev))
 
 			tt.roundTrip(t, New(cev, tt.target))
 		})
 	}
+}
+
+// TestEventSource_GPGKeyEvent_ResourceIDIgnoresUID guards the invariant that
+// GPG key events are keyed by name only. A delete for an absent ConfigMap (empty
+// UID) and a later recreate (new UID) must share a resource ID so the
+// EventWriter serializes them in a single FIFO queue; otherwise a stale delete
+// could be reordered after the recreate and wipe the fresh copy.
+func TestEventSource_GPGKeyEvent_ResourceIDIgnoresUID(t *testing.T) {
+	evs := NewEventSource("test-source")
+	name := "argocd-gpg-keys-cm"
+
+	deleteEv := evs.GPGKeyEvent(Delete, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd"},
+	})
+	recreateEv := evs.GPGKeyEvent(Create, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd", UID: ktypes.UID("new-uid")},
+	})
+
+	require.Equal(t, name, ResourceID(deleteEv))
+	require.Equal(t, name, ResourceID(recreateEv))
+	require.Equal(t, ResourceID(deleteEv), ResourceID(recreateEv),
+		"a GPG delete and a recreate with a different UID must share a resource ID")
 }
 
 func TestEventSource_ClusterCacheInfoUpdateEvent(t *testing.T) {

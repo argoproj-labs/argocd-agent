@@ -245,11 +245,15 @@ func (evs EventSource) GPGKeyEvent(evType EventType, cm *corev1.ConfigMap) *clou
 	cev.SetSpecVersion(cloudEventSpecVersion)
 	cev.SetType(evType.String())
 	cev.SetExtension(eventID, createEventID(cm.ObjectMeta))
-	cev.SetExtension(resourceID, createResourceID(cm.ObjectMeta))
+	cev.SetExtension(resourceID, createGPGKeyResourceID(cm.ObjectMeta))
 	cev.SetDataSchema(targets.GPGKey.String())
 	cev.SetSubject(fmt.Sprintf("%s/%s", cm.Namespace, cm.Name))
 	_ = cev.SetData(cloudevents.ApplicationJSON, cm)
 	return &cev
+}
+
+func createGPGKeyResourceID(res v1.ObjectMeta) string {
+	return res.Name
 }
 
 // HeartbeatEvent creates a ping or pong event for keepalive purposes.

@@ -382,6 +382,66 @@ func (suite *GPGKeyTestSuite) Test_GPGKey_UseAndUpdatePreExistingConfigMap() {
 	}, 60*time.Second, 1*time.Second, "Orphan GPG keys ConfigMap should be used and updated with principal's data and source-uid annotation")
 }
 
+func (suite *GPGKeyTestSuite) Test_GPGKey_DeletedWhilePrincipalDown() {
+	requires := suite.Require()
+
+	key := types.NamespacedName{Name: common.ArgoCDGPGKeysConfigMapName, Namespace: fixture.ManagedAgentNamespace}
+
+	// Create the GPG keys ConfigMap on the principal and wait for it to sync to
+	// the managed agent.
+	keyData := "-----BEGIN PGP PUBLIC KEY BLOCK-----\ndisconnected-delete\n-----END PGP PUBLIC KEY BLOCK-----\n"
+	sourceGPGKeys := corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      common.ArgoCDGPGKeysConfigMapName,
+			Namespace: fixture.PrincipalNamespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/name":    common.ArgoCDGPGKeysConfigMapName,
+				"app.kubernetes.io/part-of": "argocd",
+			},
+		},
+		Data: map[string]string{gpgKeyIDPrimary: keyData},
+	}
+	requires.NoError(suite.PrincipalClient.Create(suite.Ctx, &sourceGPGKeys, metav1.CreateOptions{}))
+
+	requires.Eventually(func() bool {
+		cm := corev1.ConfigMap{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &cm, metav1.GetOptions{})
+		return err == nil && cm.Annotations[manager.SourceUIDAnnotation] == string(sourceGPGKeys.UID)
+	}, 60*time.Second, 1*time.Second, "GPG keys ConfigMap should be pushed to managed-agent")
+
+	// Stop the principal so that the upcoming deletion is never observed by its
+	// informer and no delete event is emitted to the agent.
+	requires.NoError(fixture.StopProcess(fixture.PrincipalName, suite.T()))
+	requires.Eventually(func() bool {
+		return !fixture.IsProcessRunning(fixture.PrincipalName, suite.T())
+	}, 30*time.Second, 1*time.Second)
+	// Always bring the principal back, even if an assertion below fails.
+	defer func() {
+		if !fixture.IsProcessRunning(fixture.PrincipalName, suite.T()) {
+			requires.NoError(fixture.StartProcess(fixture.PrincipalName, suite.T()))
+			fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+		}
+	}()
+
+	// Delete the ConfigMap on the principal's cluster while the principal is down.
+	requires.NoError(suite.PrincipalClient.Delete(suite.Ctx, &sourceGPGKeys, metav1.DeleteOptions{}))
+
+	// The managed agent still holds its stale copy at this point.
+	staleCM := corev1.ConfigMap{}
+	requires.NoError(suite.ManagedAgentClient.Get(suite.Ctx, key, &staleCM, metav1.GetOptions{}))
+
+	// Restart the principal. On reconnect, it must tell the agent to drop the
+	// stale copy even though it never emitted a live delete event.
+	requires.NoError(fixture.StartProcess(fixture.PrincipalName, suite.T()))
+	fixture.CheckReadiness(suite.T(), fixture.PrincipalName)
+
+	requires.Eventually(func() bool {
+		cm := corev1.ConfigMap{}
+		err := suite.ManagedAgentClient.Get(suite.Ctx, key, &cm, metav1.GetOptions{})
+		return err != nil && errors.IsNotFound(err)
+	}, 90*time.Second, 1*time.Second, "stale GPG keys ConfigMap should be removed from managed-agent after principal reconnects")
+}
+
 func TestGPGKeyTestSuite(t *testing.T) {
 	suite.Run(t, new(GPGKeyTestSuite))
 }
