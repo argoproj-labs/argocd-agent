@@ -32,6 +32,11 @@ const SecretNameSharedClientCert = "argocd-agent-shared-client-tls"
 // client certificate + key for an HA admin operator.
 const SecretNameHAAdminTLS = "argocd-agent-ha-admin-tls"
 
+// SecretNameHAPeerTLS is the name of the secret containing the dedicated TLS
+// client certificate + key a replica principal uses to authenticate to its
+// peer principal for HA replication.
+const SecretNameHAPeerTLS = "argocd-agent-ha-peer-tls"
+
 // SecretNameJWT is the name of the secret containing the JWT signing key
 // for the principal.
 const SecretNameJWT = "argocd-agent-jwt"

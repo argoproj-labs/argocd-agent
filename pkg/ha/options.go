@@ -58,6 +58,12 @@ type Options struct {
 	AdminTLSCertPath string
 	AdminTLSKeyPath  string
 	AdminCAPath      string
+
+	// PeerClientCertPath and PeerClientKeyPath point to the dedicated client
+	// certificate a replica principal presents when authenticating to its peer
+	// principal for replication.
+	PeerClientCertPath string
+	PeerClientKeyPath  string
 }
 
 // DefaultOptions returns the default HA options
@@ -203,6 +209,22 @@ func WithAdminTLS(certPath, keyPath, caPath string) Option {
 		o.AdminTLSCertPath = certPath
 		o.AdminTLSKeyPath = keyPath
 		o.AdminCAPath = caPath
+		return nil
+	}
+}
+
+// WithPeerClientTLS configures the dedicated client certificate a replica
+// principal uses to authenticate to its peer principal for replication.
+func WithPeerClientTLS(certPath, keyPath string) Option {
+	return func(o *Options) error {
+		if certPath == "" && keyPath == "" {
+			return nil
+		}
+		if certPath == "" || keyPath == "" {
+			return fmt.Errorf("ha-peer-tls requires both --ha-peer-tls-cert and --ha-peer-tls-key")
+		}
+		o.PeerClientCertPath = certPath
+		o.PeerClientKeyPath = keyPath
 		return nil
 	}
 }

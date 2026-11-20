@@ -107,6 +107,17 @@ for name in primary replica; do
         -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1") 2>/dev/null
 done
 
+echo "=== Generating HA replication client certificate ==="
+# Both principals share this certificate to authenticate to each other's
+# replication endpoint, matching the CN issued by "pki issue principal-peer".
+openssl genrsa -out "$CERTS_DIR/peer.key" 2048 2>/dev/null
+openssl req -new -key "$CERTS_DIR/peer.key" \
+    -out "$TMPDIR/peer.csr" -subj "/CN=argocd-agent-principal-peer" 2>/dev/null
+openssl x509 -req -in "$TMPDIR/peer.csr" \
+    -CA "$TMPDIR/ca.crt" -CAkey "$TMPDIR/ca.key" -CAcreateserial \
+    -out "$CERTS_DIR/peer.crt" -days 1 -sha256 \
+    -extfile <(printf "extendedKeyUsage=clientAuth") 2>/dev/null
+
 rm -rf "$TMPDIR"
 
 echo ""
