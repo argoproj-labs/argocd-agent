@@ -61,7 +61,7 @@ Kubernetes: `>=1.24.0-0`
 | podSecurityContext | object | `{"fsGroup":999,"fsGroupChangePolicy":"OnRootMismatch","runAsGroup":999,"runAsNonRoot":true,"runAsUser":999,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod-level securityContext. Applied to the Pod spec. |
 | principal.additionalArgs | list | `[]` | Extra CLI arguments to pass to the principal binary. |
 | principal.allowedNamespaces | string | `""` | Comma-separated list of additional namespaces the principal watches. Supports glob patterns. |
-| principal.auth | string | `"mtls:CN=([^,]+)"` | Authentication method. Formats: "mtls:CN=([^,]+)", "userpass:/path/to/creds", "spiffe-jwt:spiffe://...". |
+| principal.auth | string | `"mtls:subject:CN=([^,]+)"` | Authentication method. Formats: "mtls:subject:CN=([^,]+)", "userpass:/path/to/creds", "spiffe-jwt:spiffe://...". |
 | principal.destinationBasedMapping | bool | `false` | Enable destination-based mapping (deploys apps into their declared namespace instead of the agent namespace). |
 | principal.eventProcessors | string | `"10"` | Number of concurrent event processors. |
 | principal.healthz.port | int | `8003` | Health check server port. |

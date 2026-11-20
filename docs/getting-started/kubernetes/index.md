@@ -178,7 +178,7 @@ The principal is pre-configured to use mTLS authentication by default. You can v
 # Check the principal authentication configuration
 kubectl get configmap argocd-agent-params -n argocd --context <control-plane-context> \
   -o jsonpath='{.data.principal\.auth}'
-# Should output: mtls:CN=([^,]+)
+# Should output: mtls:subject:CN=([^,]+)
 ```
 
 Update principal configuration:

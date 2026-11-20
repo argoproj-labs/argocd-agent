@@ -74,7 +74,7 @@ spec:
       enabled: true
       allowedNamespaces:
         - "*"
-      auth: "mtls:CN=([^,]+)"
+      auth: "mtls:subject:CN=([^,]+)"
       logLevel: "trace"
       image: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent:latest"
   sourceNamespaces:
