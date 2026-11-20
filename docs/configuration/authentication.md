@@ -330,7 +330,7 @@ agent.creds: "userpass:/app/config/creds/userpass.creds"
 1. Generate client certificates for all agents (see [TLS & Certificates](tls-certificates.md))
 2. Deploy certificates to agent clusters
 3. Update agent configuration: `agent.creds: "mtls:"`
-4. Update principal configuration: `principal.auth: "mtls:CN=([^,]+)"`
+4. Update principal configuration: `principal.auth: "mtls:subject:CN=([^,]+)"`
 5. Enable client certificate requirement: `principal.tls.client-cert.require: "true"`
 6. Remove userpass secrets from all clusters
 

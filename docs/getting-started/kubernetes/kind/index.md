@@ -183,7 +183,7 @@ kubectl get configmap argocd-agent-params \
   --context kind-$PRINCIPAL_CLUSTER_NAME \
   -o jsonpath='{.data.principal\.auth}'
 
-# Should output: mtls:CN=([^,]+)
+# Should output: mtls:subject:CN=([^,]+)
 ```
 
 ### Open NetworkPolicy for agent traffic
