@@ -3,12 +3,12 @@ kind: ConfigMap
 metadata:
   name: argocd-agent-params
 data:
-  # principal.listen.host: The interface address to listen on.
+  # principal.listen.host: The interface address to listen on. Leave empty for
+  # all interfaces.
   # SECURITY WARNING: For header-based authentication, this MUST be "127.0.0.1"
-  # to prevent authentication bypass. Only use "" (all interfaces) when using
-  # mTLS authentication within a secure service mesh.
-  # Default: "127.0.0.1"
-  principal.listen.host: "127.0.0.1"
+  # to prevent authentication bypass.
+  # Default: ""
+  principal.listen.host: ""
   # principal.listen.port: The port the gRPC server should listen on.
   # Default: 8443
   principal.listen.port: "8443"
