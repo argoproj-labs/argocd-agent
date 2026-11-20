@@ -113,6 +113,11 @@ data:
   # agent.resource-proxy.enable: Whether to enable the resource proxy.
   # Default: true
   agent.resource-proxy.enable: "true"
+  # agent.resource-proxy.impersonation.enabled: Whether the resource proxy
+  # performs requests on behalf of the service account that Argo CD asks for.
+  # Needs the impersonate verb on serviceaccounts in the agent's RBAC.
+  # Default: false
+  agent.resource-proxy.impersonation.enabled: "false"
   # agent.redis.address: The address of the Redis server.
   # Default: "argocd-redis:6379"
   agent.redis.address: "argocd-redis:6379"

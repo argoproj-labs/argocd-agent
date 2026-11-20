@@ -42,7 +42,7 @@ Here is the list of available metrics:
 | `argocd_principal_event_writer_events_discarded_total` | counterVec | The total number of events discarded by the EventWriter after exhausting retries. |
 | `principal_errors` | counterVec | The total number of errors occurred in principal. |
 | `argocd_principal_resource_proxy_requests_total` | counterVec | The total number of resource proxy requests received by principal. |
-| `argocd_principal_resource_proxy_errors_total` | counterVec | The total number of resource proxy request failures on principal. |
+| `argocd_principal_resource_proxy_errors_total` | counterVec | The total number of resource proxy request failures on principal. The `reason` label includes `invalid_impersonation`, for a request that asks for an identity the principal cannot honor, and `impersonation_unsupported`, for an exec request that asks for an identity. |
 | `argocd_principal_redis_proxy_requests_total` | counterVec | The total number of Redis proxy requests forwarded to agents. |
 | `argocd_principal_redis_proxy_errors_total` | counterVec | The total number of Redis proxy request failures on principal. |
 
