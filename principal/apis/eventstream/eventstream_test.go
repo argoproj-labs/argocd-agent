@@ -30,6 +30,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	"github.com/argoproj-labs/argocd-agent/principal/apis/eventstream/mock"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -67,8 +68,13 @@ func (f *fakeStatusUpdater) statusesFor(name string) []v1alpha1.ConnectionStatus
 	return out
 }
 
+// testMetrics is shared by every test in this package: PrincipalMetrics
+// registers with the default prometheus registerer, which panics on a second
+// registration of the same collector.
+var testMetrics = metrics.NewPrincipalMetrics()
+
 func Test_Subscribe(t *testing.T) {
-	metric := metrics.NewPrincipalMetrics()
+	metric := testMetrics
 	cluster := &cluster.Manager{}
 
 	t.Run("Test send to subcription stream", func(t *testing.T) {
@@ -602,4 +608,164 @@ func TestOnDisconnectConnectionStatus(t *testing.T) {
 
 func init() {
 	logrus.SetLevel(logrus.TraceLevel)
+}
+
+// waitClosed waits for ch with a local deadline, so a test that wedges fails
+// with its own message instead of running into the package timeout.
+func waitClosed(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("%s did not happen within 3s", what)
+	}
+}
+
+// subscribeStream returns a stream for agentName whose Recv blocks until the
+// returned release is called, and a release that is safe to call more than
+// once. Release is also registered as cleanup, so a failing assertion cannot
+// leave the Subscribe goroutine parked in its Recv hook.
+func subscribeStream(t *testing.T, agentName string) (*mock.MockEventServer, func()) {
+	t.Helper()
+	gate := make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(gate) }) }
+	t.Cleanup(release)
+
+	st := &mock.MockEventServer{
+		AgentName: agentName,
+		AgentMode: string(types.AgentModeManaged),
+	}
+	st.AddRecvHook(func(_ *mock.MockEventServer) error {
+		<-gate
+		return io.EOF
+	})
+	return st, release
+}
+
+// An agent that connects while the principal still holds its previous stream
+// must preempt that previous client.
+func TestSubscribe_PreemptsPreviousClientForSameAgent(t *testing.T) {
+	statusUpdater := &fakeStatusUpdater{}
+	qs := queue.NewSendRecvQueues()
+	qs.Create("agent-p")
+	s := NewServer(qs, event.NewEventWritersMap(), testMetrics, statusUpdater)
+
+	connectedBefore := testutil.ToFloat64(testMetrics.AgentConnected)
+
+	activeClient := func() *client {
+		s.activeClientsMu.Lock()
+		defer s.activeClientsMu.Unlock()
+		return s.activeClients["agent-p"]
+	}
+
+	// Both streams belong to the same agent, as they would on a reconnect.
+	first, releaseFirst := subscribeStream(t, "agent-p")
+	firstReturned := make(chan struct{})
+	go func() {
+		_ = s.Subscribe(first)
+		close(firstReturned)
+	}()
+
+	var firstClient *client
+	require.Eventually(t, func() bool {
+		firstClient = activeClient()
+		return firstClient != nil
+	}, time.Second, 10*time.Millisecond)
+
+	// The agent reconnects while the first stream is still held.
+	second, releaseSecond := subscribeStream(t, "agent-p")
+	secondReturned := make(chan struct{})
+	go func() {
+		_ = s.Subscribe(second)
+		close(secondReturned)
+	}()
+
+	// The previous client must be canceled, so its goroutines (including its
+	// SendWaitingEvents loop) wind down.
+	waitClosed(t, firstClient.ctx.Done(), "the reconnect canceling the previous client")
+
+	// Releasing the first stream's Recv lets its Subscribe return.
+	releaseFirst()
+	waitClosed(t, firstReturned, "the preempted Subscribe returning")
+
+	// A preempted client must give back the gauge it incremented, and no more.
+	// The replacing client cancels its predecessor before it increments the
+	// gauge, so the preempted connection's decrement can land first and the
+	// expected value is only reached once the replacement is initialized.
+	require.Eventually(t, func() bool {
+		return testutil.ToFloat64(testMetrics.AgentConnected) == connectedBefore+1
+	}, 3*time.Second, 10*time.Millisecond,
+		"the preempted connection must decrement the gauge it incremented, and no more")
+
+	// The newest client stays registered and connected.
+	secondClient := activeClient()
+	require.NotNil(t, secondClient)
+	assert.NotSame(t, firstClient, secondClient)
+	assert.NoError(t, secondClient.ctx.Err(), "the new client must not be canceled by the preemption")
+
+	// Preempting the previous client must not report the agent as disconnected:
+	// it is connected, on the new stream.
+	assert.NotContains(t, statusUpdater.statusesFor("agent-p"), v1alpha1.ConnectionStatusFailed)
+
+	releaseSecond()
+	waitClosed(t, secondReturned, "the active Subscribe returning")
+}
+
+// The event writer's target must follow the active client: after a reconnect,
+// events go to the stream that is now active and never to the one it replaced.
+// Registration and UpdateTarget happen under one lock so the two cannot be
+// ordered against each other.
+func TestSubscribe_EventWriterTargetFollowsTheActiveClient(t *testing.T) {
+	statusUpdater := &fakeStatusUpdater{}
+	qs := queue.NewSendRecvQueues()
+	qs.Create("agent-t")
+	s := NewServer(qs, event.NewEventWritersMap(), testMetrics, statusUpdater)
+
+	activeClient := func() *client {
+		s.activeClientsMu.Lock()
+		defer s.activeClientsMu.Unlock()
+		return s.activeClients["agent-t"]
+	}
+
+	first, releaseFirst := subscribeStream(t, "agent-t")
+	firstReturned := make(chan struct{})
+	go func() {
+		_ = s.Subscribe(first)
+		close(firstReturned)
+	}()
+
+	var firstClient *client
+	require.Eventually(t, func() bool {
+		firstClient = activeClient()
+		return firstClient != nil
+	}, time.Second, 10*time.Millisecond)
+
+	second, releaseSecond := subscribeStream(t, "agent-t")
+	secondReturned := make(chan struct{})
+	go func() {
+		_ = s.Subscribe(second)
+		close(secondReturned)
+	}()
+
+	// Let the preempted connection finish tearing down, so any send it still
+	// had in flight would have landed by the time we check.
+	waitClosed(t, firstClient.ctx.Done(), "the reconnect canceling the previous client")
+	releaseFirst()
+	waitClosed(t, firstReturned, "the preempted Subscribe returning")
+
+	emitter := event.NewEventSource("test")
+	qs.SendQ("agent-t").Add(emitter.ApplicationEvent(
+		event.Create,
+		&v1alpha1.Application{ObjectMeta: v1.ObjectMeta{Name: "app", Namespace: "ns"}},
+	))
+
+	require.Eventually(t, func() bool {
+		return second.NumSent.Load() > 0
+	}, 3*time.Second, 10*time.Millisecond, "the active stream received no events")
+	assert.Equal(t, uint32(0), first.NumSent.Load(),
+		"the replaced stream must never be written to")
+
+	releaseSecond()
+	waitClosed(t, secondReturned, "the active Subscribe returning")
 }

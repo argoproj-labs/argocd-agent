@@ -584,3 +584,75 @@ func (fs *fakeStream) Send(event *eventstreamapi.Event) error {
 func (fs *fakeStream) Context() context.Context {
 	return context.Background()
 }
+
+// cancelOnFirstSendStream cancels a context the first time Send is called, and
+// counts how many sends happen in total.
+type cancelOnFirstSendStream struct {
+	mu     sync.Mutex
+	sent   int
+	cancel context.CancelFunc
+}
+
+func (s *cancelOnFirstSendStream) Send(_ *eventstreamapi.Event) error {
+	s.mu.Lock()
+	s.sent++
+	first := s.sent == 1
+	s.mu.Unlock()
+
+	if first && s.cancel != nil {
+		s.cancel()
+	}
+	return nil
+}
+
+func (s *cancelOnFirstSendStream) Context() context.Context {
+	return context.Background()
+}
+
+func (s *cancelOnFirstSendStream) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sent
+}
+
+// A canceled SendWaitingEvents must stop within the pass it is in, not at the
+// end of it. A pass covers every waiting resource, so a loop that only checked
+// for cancellation at the top of the pass would keep writing to a target that
+// a newer connection has since taken over.
+func TestSendWaitingEvents_CancelStopsSendsWithinThePass(t *testing.T) {
+	es := NewEventSource("test")
+	eventWriterLogger := logrus.StandardLogger().WithField("module", "EventWriter")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fs := &cancelOnFirstSendStream{cancel: cancel}
+	evSender := NewEventWriter("test", fs, eventWriterLogger)
+
+	const numEvents = 50
+	for i := 0; i < numEvents; i++ {
+		evSender.Add(es.ApplicationEvent(Create, &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            fmt.Sprintf("app-%d", i),
+				Namespace:       "test",
+				ResourceVersion: "1",
+				UID:             types.UID(fmt.Sprintf("uid-%d", i)),
+			},
+		}))
+	}
+
+	done := make(chan struct{})
+	go func() {
+		evSender.SendWaitingEvents(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("SendWaitingEvents did not return after context cancellation")
+	}
+
+	require.Equal(t, 1, fs.count(),
+		"the loop must stop at the first event after cancellation, not finish the pass")
+}
