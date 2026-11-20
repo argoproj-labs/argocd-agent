@@ -730,3 +730,31 @@ func Test_checkClusterNameConflict(t *testing.T) {
 		})
 	}
 }
+
+func Test_labelSliceToMap(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      []string
+		want    map[string]string
+		wantErr string
+	}{
+		{name: "no labels", in: nil, want: map[string]string{}},
+		{name: "several labels", in: []string{"a=b", "c=d"}, want: map[string]string{"a": "b", "c": "d"}},
+		{name: "value may contain equals signs", in: []string{"a=b=c"}, want: map[string]string{"a": "b=c"}},
+		{name: "empty value is allowed", in: []string{"a="}, want: map[string]string{"a": ""}},
+		{name: "missing equals sign", in: []string{"ab"}, wantErr: "couldn't parse label definition 'ab'"},
+		{name: "duplicate key", in: []string{"a=b", "a=c"}, wantErr: "label 'a' already set with value 'b'"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := labelSliceToMap(tt.in)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				assert.Nil(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
