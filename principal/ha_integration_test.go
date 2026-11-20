@@ -26,15 +26,19 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/argocd/cluster"
+	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	appmanager "github.com/argoproj-labs/argocd-agent/internal/manager/application"
+	appsetmanager "github.com/argoproj-labs/argocd-agent/internal/manager/applicationset"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/repository"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
@@ -1183,6 +1187,166 @@ func newAppTestServer(mockAppBackend *mocks.Application) *Server {
 	}
 	s.appManager = mgr
 	return s
+}
+
+// fakeAppSetBackend is an in-memory backend.ApplicationSet.
+type fakeAppSetBackend struct {
+	sets map[string]*v1alpha1.ApplicationSet
+}
+
+func (f *fakeAppSetBackend) List(_ context.Context, selector backend.ApplicationSetSelector) ([]v1alpha1.ApplicationSet, error) {
+	out := make([]v1alpha1.ApplicationSet, 0, len(f.sets))
+	for _, s := range f.sets {
+		if len(selector.Namespaces) == 0 || slices.Contains(selector.Namespaces, s.Namespace) {
+			out = append(out, *s)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeAppSetBackend) Create(_ context.Context, s *v1alpha1.ApplicationSet) (*v1alpha1.ApplicationSet, error) {
+	f.sets[s.Namespace+"/"+s.Name] = s
+	return s, nil
+}
+
+func (f *fakeAppSetBackend) Get(_ context.Context, name, namespace string) (*v1alpha1.ApplicationSet, error) {
+	if s, ok := f.sets[namespace+"/"+name]; ok {
+		return s, nil
+	}
+	return nil, k8serrors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "applicationsets"}, name)
+}
+
+func (f *fakeAppSetBackend) Delete(_ context.Context, name, namespace string, _ *backend.DeletionPropagation) error {
+	delete(f.sets, namespace+"/"+name)
+	return nil
+}
+
+func (f *fakeAppSetBackend) Update(_ context.Context, s *v1alpha1.ApplicationSet) (*v1alpha1.ApplicationSet, error) {
+	f.sets[s.Namespace+"/"+s.Name] = s
+	return s, nil
+}
+
+func (f *fakeAppSetBackend) StartInformer(context.Context) error { return nil }
+
+func (f *fakeAppSetBackend) EnsureSynced(time.Duration) error { return nil }
+
+func newAppSetTestServer(sets ...*v1alpha1.ApplicationSet) (*Server, *fakeAppSetBackend) {
+	be := &fakeAppSetBackend{sets: map[string]*v1alpha1.ApplicationSet{}}
+	for _, s := range sets {
+		be.sets[s.Namespace+"/"+s.Name] = s
+	}
+	s := createTestServer()
+	s.ctx = context.Background()
+	s.namespace = "argocd"
+	s.appSetManager = appsetmanager.NewApplicationSetManager(be, "argocd")
+	return s, be
+}
+
+func TestHandleSnapshot_ApplicationSetOmittedFromSnapshot(t *testing.T) {
+	newAppSet := func(replicated bool) *v1alpha1.ApplicationSet {
+		appSet := &v1alpha1.ApplicationSet{ObjectMeta: metav1.ObjectMeta{Name: "stale", Namespace: "argocd", UID: "uid-1"}}
+		if replicated {
+			appSet.Annotations = map[string]string{manager.SourceUIDAnnotation: "primary-uid"}
+		}
+		return appSet
+	}
+	applySnapshot := func(t *testing.T, replica, primary *Server, snapshotSeq, currentSeq uint64, principalResources ...*replicationapi.Resource) {
+		t.Helper()
+		components, err := NewHAComponents(context.Background(), replica)
+		require.NoError(t, err)
+		components.ReplicationClient = newReplicationConfirmationClient(t, primary, snapshotSeq, currentSeq)
+		require.NoError(t, components.handleSnapshot(&replicationapi.ReplicationSnapshot{
+			LastSequenceNum:    snapshotSeq,
+			PrincipalResources: principalResources,
+		}))
+	}
+
+	t.Run("deletes a replicated ApplicationSet the primary no longer has", func(t *testing.T) {
+		replica, replicaBackend := newAppSetTestServer(newAppSet(true))
+		primary, _ := newAppSetTestServer()
+
+		applySnapshot(t, replica, primary, 7, 7)
+
+		assert.Empty(t, replicaBackend.sets)
+	})
+
+	t.Run("keeps it when the primary sequence has advanced", func(t *testing.T) {
+		replica, replicaBackend := newAppSetTestServer(newAppSet(true))
+		primary, _ := newAppSetTestServer()
+
+		applySnapshot(t, replica, primary, 7, 8)
+
+		assert.Contains(t, replicaBackend.sets, "argocd/stale")
+	})
+
+	t.Run("keeps it when the primary still has it", func(t *testing.T) {
+		onPrimary := newAppSet(true)
+		onPrimary.Labels = map[string]string{"origin": "primary"}
+		replica, replicaBackend := newAppSetTestServer(newAppSet(true))
+		primary, _ := newAppSetTestServer(onPrimary)
+
+		applySnapshot(t, replica, primary, 7, 7)
+
+		require.Contains(t, replicaBackend.sets, "argocd/stale")
+		assert.Equal(t, "primary", replicaBackend.sets["argocd/stale"].Labels["origin"], "the replica copy is refreshed")
+		assert.Empty(t, replica.resources.GetAllResources(""), "ApplicationSets are not tracked per agent")
+	})
+
+	t.Run("keeps an ApplicationSet that was not replicated from the primary", func(t *testing.T) {
+		replica, replicaBackend := newAppSetTestServer(newAppSet(false))
+		primary, _ := newAppSetTestServer()
+
+		applySnapshot(t, replica, primary, 7, 7)
+
+		assert.Contains(t, replicaBackend.sets, "argocd/stale")
+	})
+
+	t.Run("keeps an ApplicationSet that is in the snapshot", func(t *testing.T) {
+		appSet := newAppSet(true)
+		data, err := json.Marshal(appSet)
+		require.NoError(t, err)
+		replica, replicaBackend := newAppSetTestServer(appSet)
+		primary, _ := newAppSetTestServer()
+
+		applySnapshot(t, replica, primary, 7, 7, &replicationapi.Resource{
+			Kind: "ApplicationSet", Name: appSet.Name, Namespace: appSet.Namespace, Data: data,
+		})
+
+		assert.Contains(t, replicaBackend.sets, "argocd/stale")
+	})
+
+	t.Run("keeps an ApplicationSet outside the principal namespace", func(t *testing.T) {
+		appSet := newAppSet(true)
+		appSet.Namespace = "other"
+		replica, replicaBackend := newAppSetTestServer(appSet)
+		primary, _ := newAppSetTestServer()
+
+		applySnapshot(t, replica, primary, 7, 7)
+
+		assert.Contains(t, replicaBackend.sets, "other/stale")
+	})
+
+	t.Run("keeps it when the primary cannot be reached", func(t *testing.T) {
+		replica, replicaBackend := newAppSetTestServer(newAppSet(true))
+		components, err := NewHAComponents(context.Background(), replica)
+		require.NoError(t, err)
+		components.ReplicationClient = replication.NewClient(context.Background())
+
+		require.NoError(t, components.handleSnapshot(&replicationapi.ReplicationSnapshot{LastSequenceNum: 7}))
+
+		assert.Contains(t, replicaBackend.sets, "argocd/stale")
+	})
+
+	t.Run("keeps it when there is no replication client", func(t *testing.T) {
+		replica, replicaBackend := newAppSetTestServer(newAppSet(true))
+		components, err := NewHAComponents(context.Background(), replica)
+		require.NoError(t, err)
+		components.ReplicationClient = nil
+
+		require.NoError(t, components.handleSnapshot(&replicationapi.ReplicationSnapshot{LastSequenceNum: 7}))
+
+		assert.Contains(t, replicaBackend.sets, "argocd/stale")
+	})
 }
 
 func newConfirmMissingClient(t *testing.T, response *replicationapi.ConfirmMissingResourcesResponse) (*replication.Client, *confirmMissingServer) {

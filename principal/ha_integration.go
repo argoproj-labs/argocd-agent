@@ -28,6 +28,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/haadminapi"
@@ -897,6 +898,7 @@ func (h *HAComponents) handleSnapshot(snapshot *replicationapi.ReplicationSnapsh
 			log().WithField("resource", res.Kind+"/"+res.Name).WithError(err).Warn("HA: failed to upsert principal resource from snapshot")
 		}
 	}
+	h.confirmMissingSnapshotAppSets(server.ctx, server, snapshot)
 
 	for _, agentState := range snapshot.Agents {
 		log().WithFields(map[string]any{
@@ -960,21 +962,56 @@ func (h *HAComponents) confirmMissingSnapshotResources(ctx context.Context, serv
 	}
 
 	candidates := make([]resources.ResourceKey, 0)
-	requestResources := make([]*replicationapi.Resource, 0)
 	for _, existing := range server.resources.GetAllResources(agentName) {
-		if _, ok := snapshotResources[resourceIdentity(existing)]; ok {
+		if _, ok := snapshotResources[resourceIdentity(existing)]; !ok {
+			candidates = append(candidates, existing)
+		}
+	}
+	h.confirmMissingResources(ctx, server, agentName, snapshotSequenceNum, candidates)
+}
+
+// confirmMissingSnapshotAppSets confirms with the primary the replicated
+// ApplicationSets that the snapshot omits. They are not tracked per agent.
+func (h *HAComponents) confirmMissingSnapshotAppSets(ctx context.Context, server *Server, snapshot *replicationapi.ReplicationSnapshot) {
+	if h.ReplicationClient == nil || server.appSetManager == nil {
+		return
+	}
+
+	appSets, err := server.appSetManager.List(ctx, backend.ApplicationSetSelector{Namespaces: []string{server.namespace}})
+	if err != nil {
+		log().WithError(err).Warn("HA: failed to list ApplicationSets to confirm against the snapshot")
+		return
+	}
+	inSnapshot := make(map[string]struct{}, len(snapshot.PrincipalResources))
+	for _, res := range snapshot.PrincipalResources {
+		inSnapshot[resourceIdentity(resources.ResourceKey{Kind: res.Kind, Namespace: res.Namespace, Name: res.Name})] = struct{}{}
+	}
+
+	candidates := make([]resources.ResourceKey, 0)
+	for _, appSet := range appSets {
+		if _, replicated := appSet.Annotations[manager.SourceUIDAnnotation]; !replicated {
 			continue
 		}
-		candidates = append(candidates, existing)
-		requestResources = append(requestResources, &replicationapi.Resource{
-			Name:      existing.Name,
-			Namespace: existing.Namespace,
-			Kind:      existing.Kind,
-			Uid:       existing.UID,
-		})
+		key := resources.ResourceKey{Kind: "ApplicationSet", Namespace: appSet.Namespace, Name: appSet.Name, UID: string(appSet.UID)}
+		if _, ok := inSnapshot[resourceIdentity(key)]; !ok {
+			candidates = append(candidates, key)
+		}
 	}
-	if len(requestResources) == 0 {
+	h.confirmMissingResources(ctx, server, "", snapshot.LastSequenceNum, candidates)
+}
+
+func (h *HAComponents) confirmMissingResources(ctx context.Context, server *Server, agentName string, snapshotSequenceNum uint64, candidates []resources.ResourceKey) {
+	if len(candidates) == 0 {
 		return
+	}
+	requestResources := make([]*replicationapi.Resource, 0, len(candidates))
+	for _, candidate := range candidates {
+		requestResources = append(requestResources, &replicationapi.Resource{
+			Name:      candidate.Name,
+			Namespace: candidate.Namespace,
+			Kind:      candidate.Kind,
+			Uid:       candidate.UID,
+		})
 	}
 
 	resp, err := h.ReplicationClient.ConfirmMissingResources(ctx, agentName, requestResources, snapshotSequenceNum)
@@ -1007,13 +1044,15 @@ func (h *HAComponents) confirmMissingSnapshotResources(ctx context.Context, serv
 				log().WithField("resource", key.String()).WithError(err).Warn("HA: failed to repair missing resource confirmed by primary")
 				continue
 			}
-			h.replaceTrackedResource(agentName, server, key)
+			if agentName != "" {
+				h.replaceTrackedResource(agentName, server, key)
+			}
 		case string(replicationserver.MissingResourceStatusDeleted):
 			candidate, ok := candidateByIdentity[resourceIdentity(key)]
 			if !ok {
 				candidate = key
 			}
-			if h.deleteConfirmedMissingResource(ctx, server, candidate) {
+			if h.deleteConfirmedMissingResource(ctx, server, candidate) && agentName != "" {
 				server.resources.Remove(agentName, candidate)
 			}
 		default:
