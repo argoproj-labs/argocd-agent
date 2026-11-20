@@ -650,16 +650,18 @@ func TestEventSource_resourceEvents(t *testing.T) {
 	meta := metav1.ObjectMeta{Name: "obj", Namespace: "ns", UID: ktypes.UID("uid-1"), ResourceVersion: "7"}
 
 	tests := []struct {
-		name      string
-		evType    EventType
-		target    targets.EventTarget
-		build     func() *cloudevents.Event
-		roundTrip func(t *testing.T, ev *Event)
+		name               string
+		evType             EventType
+		target             targets.EventTarget
+		expectedResourceID string
+		build              func() *cloudevents.Event
+		roundTrip          func(t *testing.T, ev *Event)
 	}{
 		{
-			name:   "appproject",
-			evType: Create,
-			target: targets.AppProject,
+			name:               "appproject",
+			evType:             Create,
+			target:             targets.AppProject,
+			expectedResourceID: "obj_uid-1",
 			build: func() *cloudevents.Event {
 				return evs.AppProjectEvent(Create, &v1alpha1.AppProject{ObjectMeta: meta})
 			},
@@ -670,9 +672,10 @@ func TestEventSource_resourceEvents(t *testing.T) {
 			},
 		},
 		{
-			name:   "repository",
-			evType: SpecUpdate,
-			target: targets.Repository,
+			name:               "repository",
+			evType:             SpecUpdate,
+			target:             targets.Repository,
+			expectedResourceID: "obj_uid-1",
 			build: func() *cloudevents.Event {
 				return evs.RepositoryEvent(SpecUpdate, &corev1.Secret{ObjectMeta: meta})
 			},
@@ -683,9 +686,10 @@ func TestEventSource_resourceEvents(t *testing.T) {
 			},
 		},
 		{
-			name:   "gpgkey",
-			evType: Delete,
-			target: targets.GPGKey,
+			name:               "gpgkey",
+			evType:             Delete,
+			target:             targets.GPGKey,
+			expectedResourceID: "obj",
 			build: func() *cloudevents.Event {
 				return evs.GPGKeyEvent(Delete, &corev1.ConfigMap{ObjectMeta: meta})
 			},
@@ -707,12 +711,29 @@ func TestEventSource_resourceEvents(t *testing.T) {
 			require.Equal(t, tt.target.String(), cev.DataSchema())
 			require.Equal(t, "ns/obj", cev.Subject())
 			require.Equal(t, "obj_uid-1_7", EventID(cev))
-			require.Equal(t, "obj_uid-1", ResourceID(cev))
+			require.Equal(t, tt.expectedResourceID, ResourceID(cev))
 			require.Equal(t, tt.target, Target(cev))
 
 			tt.roundTrip(t, New(cev, tt.target))
 		})
 	}
+}
+
+func TestEventSource_GPGKeyEvent_ResourceIDIgnoresUID(t *testing.T) {
+	evs := NewEventSource("test-source")
+	name := "argocd-gpg-keys-cm"
+
+	deleteEv := evs.GPGKeyEvent(Delete, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd"},
+	})
+	recreateEv := evs.GPGKeyEvent(Create, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "argocd", UID: ktypes.UID("new-uid")},
+	})
+
+	require.Equal(t, name, ResourceID(deleteEv))
+	require.Equal(t, name, ResourceID(recreateEv))
+	require.Equal(t, ResourceID(deleteEv), ResourceID(recreateEv),
+		"a GPG delete and a recreate with a different UID must share a resource ID")
 }
 
 func TestEventSource_ClusterCacheInfoUpdateEvent(t *testing.T) {

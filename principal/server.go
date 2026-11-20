@@ -120,6 +120,8 @@ type Server struct {
 
 	repoManager   *repository.RepositoryManager
 	gpgKeyManager *gpgkey.GPGKeyManager
+	// gpgKeySyncLock serializes sendCurrentStateToAgent's GPG key check-then-enqueue against syncGPGKeyToManagedAgents,
+	gpgKeySyncLock sync.Mutex
 	// At present, 'watchLock' is only acquired on calls to 'updateAppCallback'. This behaviour was added as a short-term attempt to preserve update event ordering. However, this is known to be problematic due to the potential for race conditions, both within itself, and between other event processors like deleteAppCallback.
 	watchLock sync.RWMutex
 	// clientMap is not currently used
@@ -1197,11 +1199,30 @@ func (s *Server) sendCurrentStateToAgent(agentParam types.Agent) error {
 	}
 
 	// Send GPG keys ConfigMap to the agent (for managed agents only)
+	// Lock the gpgKeySyncLock to ensure that the ConfigMap is not deleted while we are sending it to the agent.
+	s.gpgKeySyncLock.Lock()
+	defer s.gpgKeySyncLock.Unlock()
+
 	gpgKeyCM, err := s.gpgKeyManager.Get(s.ctx, common.ArgoCDGPGKeysConfigMapName, s.namespace)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to get GPG key ConfigMap: %w", err)
 		}
+
+		// The ConfigMap may have been deleted on the principal before this
+		// agent ever connected, in which case the agent never received a
+		// delete event for it. Send a delete event so the agent removes
+		// any stale copy it may still have.
+		deletedGPGKeyCM := &corev1.ConfigMap{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      common.ArgoCDGPGKeysConfigMapName,
+				Namespace: s.namespace,
+			},
+		}
+		ev := s.events.GPGKeyEvent(event.Delete, deletedGPGKeyCM)
+		tracing.PopulateSpanFromObject(span, deletedGPGKeyCM)
+		tracing.InjectTraceContext(ctx, ev)
+		sendQ.Add(ev)
 	} else if !hasSkipSyncLabel(gpgKeyCM.Labels) {
 		ev := s.events.GPGKeyEvent(event.SpecUpdate, gpgKeyCM)
 		tracing.PopulateSpanFromObject(span, gpgKeyCM)

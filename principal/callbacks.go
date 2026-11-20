@@ -743,6 +743,10 @@ func (s *Server) deleteGPGKeyCallback(outbound *corev1.ConfigMap) {
 }
 
 func (s *Server) syncGPGKeyToManagedAgents(ctx context.Context, cm *corev1.ConfigMap, evType event.EventType, logCtx *logrus.Entry) {
+	// Lock the gpgKeySyncLock to ensure that the ConfigMap is not deleted while sending it to the agent.
+	s.gpgKeySyncLock.Lock()
+	defer s.gpgKeySyncLock.Unlock()
+
 	s.clientLock.RLock()
 	defer s.clientLock.RUnlock()
 
