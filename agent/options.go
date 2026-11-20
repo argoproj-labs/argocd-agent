@@ -108,6 +108,20 @@ func WithEnableResourceProxy(enable bool) AgentOption {
 	}
 }
 
+// WithAnnotationFilter sets the Application annotation filter the agent uses
+// when emitting events and when applying updates from the principal. Pass the
+// same filter instance that the settings watcher updates, so that an allow-list
+// change made in the params ConfigMap takes effect without a restart.
+func WithAnnotationFilter(f *manager.AnnotationFilter) AgentOption {
+	return func(o *Agent) error {
+		if f == nil {
+			return fmt.Errorf("annotation filter must not be nil")
+		}
+		o.annotationFilter = f
+		return nil
+	}
+}
+
 func WithCacheRefreshInterval(interval time.Duration) AgentOption {
 	return func(o *Agent) error {
 		o.cacheRefreshInterval = interval

@@ -351,6 +351,19 @@
           "title": "listen",
           "type": "object"
         },
+        "application": {
+          "additionalProperties": false,
+          "properties": {
+            "annotationsAllowList": {
+              "default": "",
+              "description": "Comma-separated glob patterns for Application annotations to transfer between the principal and its agents, in addition to the ones argocd-agent handles itself. The agents must be configured with the same list.",
+              "title": "annotationsAllowList",
+              "type": "string"
+            }
+          },
+          "title": "application",
+          "type": "object"
+        },
         "log": {
           "additionalProperties": false,
           "properties": {

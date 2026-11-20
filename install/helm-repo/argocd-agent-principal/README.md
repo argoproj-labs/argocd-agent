@@ -1,6 +1,6 @@
 # argocd-agent-principal
 
-![Version: 0.3.8](https://img.shields.io/badge/Version-0.3.8-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.10.0](https://img.shields.io/badge/AppVersion-v0.10.0-informational?style=flat-square)
+![Version: 0.3.9](https://img.shields.io/badge/Version-0.3.9-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.10.0](https://img.shields.io/badge/AppVersion-v0.10.0-informational?style=flat-square)
 
 Argo CD Agent Principal component for multi-cluster application management
 
@@ -61,6 +61,7 @@ Kubernetes: `>=1.24.0-0`
 | podSecurityContext | object | `{"fsGroup":999,"fsGroupChangePolicy":"OnRootMismatch","runAsGroup":999,"runAsNonRoot":true,"runAsUser":999,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod-level securityContext. Applied to the Pod spec. |
 | principal.additionalArgs | list | `[]` | Extra CLI arguments to pass to the principal binary. |
 | principal.allowedNamespaces | string | `""` | Comma-separated list of additional namespaces the principal watches. Supports glob patterns. |
+| principal.application.annotationsAllowList | string | `""` | Comma-separated glob patterns for Application annotations to transfer between the principal and its agents, in addition to the ones argocd-agent handles itself (notice.argocd.argoproj.io/*, manifest-generate-paths, skip-reconcile and refresh). Unmatched annotations are left untouched on both sides and are not sent in events. Patterns capturing annotations argocd-agent depends on, or ones only meaningful on a child Application, are rejected and logged. The agents must be configured with the same list. Applied at runtime: editing principal.application.annotations.allow-list in the params ConfigMap takes effect without a restart. E.g. "argocd-image-updater.argoproj.io/*" |
 | principal.auth | string | `"mtls:CN=([^,]+)"` | Authentication method. Formats: "mtls:CN=([^,]+)", "userpass:/path/to/creds", "spiffe-jwt:spiffe://...". |
 | principal.destinationBasedMapping | bool | `false` | Enable destination-based mapping (deploys apps into their declared namespace instead of the agent namespace). |
 | principal.eventProcessors | string | `"10"` | Number of concurrent event processors. |

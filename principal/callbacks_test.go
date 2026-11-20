@@ -1724,7 +1724,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 		}
 
 		sourceUID := k8stypes.UID(oldApp.Annotations[manager.SourceUIDAnnotation])
-		s.sourceCache.Application.Set(sourceUID, oldApp.Spec)
+		s.sourceCache.Application.Set(sourceUID, s.appManager.CacheState(oldApp))
 		defer s.sourceCache.Application.Delete(sourceUID)
 
 		mockBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)

@@ -36,6 +36,11 @@ if [ -f "$E2E_ENV_FILE" ]; then
     export ARGOCD_AGENT_DESTINATION_BASED_MAPPING=${ARGOCD_AGENT_DESTINATION_BASED_MAPPING:-false}
     export ARGOCD_AGENT_CREATE_NAMESPACE=${ARGOCD_AGENT_CREATE_NAMESPACE:-false}
     export ARGOCD_AGENT_ON_APPLICATION_RECREATE=${ARGOCD_AGENT_ON_APPLICATION_RECREATE:-ignore}
+    # Exported so the allow-list e2e test can configure the
+    # component; "source" alone leaves it invisible to "go run".
+    if [ -n "$ARGOCD_AGENT_APPLICATION_ANNOTATIONS_ALLOW_LIST" ]; then
+        export ARGOCD_AGENT_APPLICATION_ANNOTATIONS_ALLOW_LIST
+    fi
     if [ -n "$ARGOCD_AGENT_SPIRE_AGENT_SOCKET" ]; then
         export ARGOCD_AGENT_SPIRE_AGENT_SOCKET
         export ARGOCD_AGENT_SPIRE_AUTH_METHOD="${ARGOCD_AGENT_SPIRE_AUTH_METHOD:-jwt}"

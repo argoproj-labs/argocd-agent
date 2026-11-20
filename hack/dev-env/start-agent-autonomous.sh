@@ -33,6 +33,11 @@ fi
 E2E_ENV_FILE="/tmp/argocd-agent-e2e"
 if [ -f "$E2E_ENV_FILE" ]; then
     source "$E2E_ENV_FILE"
+    # Exported so the allow-list e2e test can configure the
+    # component; "source" alone leaves it invisible to "go run".
+    if [ -n "$ARGOCD_AGENT_APPLICATION_ANNOTATIONS_ALLOW_LIST" ]; then
+        export ARGOCD_AGENT_APPLICATION_ANNOTATIONS_ALLOW_LIST
+    fi
     if [ -n "$ARGOCD_AUTONOMOUS_AGENT_SPIRE_AGENT_SOCKET" ]; then
         export ARGOCD_AGENT_SPIRE_AGENT_SOCKET="$ARGOCD_AUTONOMOUS_AGENT_SPIRE_AGENT_SOCKET"
         export ARGOCD_AGENT_SPIRE_AUTH_METHOD="${ARGOCD_AGENT_SPIRE_AUTH_METHOD:-jwt}"

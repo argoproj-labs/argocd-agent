@@ -60,6 +60,11 @@ func (a *Agent) DefaultAppFilterChain() *filter.Chain[*v1alpha1.Application] {
 		})
 	}
 
+	// Drop updates whose only change is to an annotation that is never
+	// transferred, so that editing one does not produce an event the peer
+	// would discard on arrival.
+	fc.AppendChangeFilter(a.annotationFilter.AppChangeFilter)
+
 	return fc
 }
 

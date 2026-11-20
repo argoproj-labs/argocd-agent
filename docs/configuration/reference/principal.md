@@ -552,6 +552,19 @@ Port the pprof server will listen on, bound to localhost. The listener always st
 
 Whether the pprof endpoints answer requests; they return `403` while disabled. See [Operations: Profiling](../../operations/profiling.md).
 
+### Application Annotations Allow List
+
+| | |
+|---|---|
+| **CLI Flag** | `--application-annotations-allow-list` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_APPLICATION_ANNOTATIONS_ALLOW_LIST` |
+| **ConfigMap Entry** | `principal.application.annotations.allow-list` |
+| **Type** | Comma-separated list of glob patterns |
+| **Default** | `""` |
+| **Applied at runtime** | Yes |
+
+Application annotations to transfer between the principal and its agents, in addition to the ones argocd-agent handles itself. Annotations that are not matched are left untouched on both sides and are not sent in events. Patterns that would capture an annotation argocd-agent depends on are rejected and logged. The agents must be configured with the same list. See [Application annotation syncing](../../user-guide/annotation-syncing.md).
+
 ### Params ConfigMap
 
 | | |

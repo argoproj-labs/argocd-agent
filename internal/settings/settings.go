@@ -33,6 +33,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/cmd/cmdutil"
 	"github.com/argoproj-labs/argocd-agent/internal/informer"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,13 +61,18 @@ const (
 	KeyFullDetail = "log.full-detail"
 	// KeyPprofEnabled ("true"/"false") gates access to the pprof endpoint.
 	KeyPprofEnabled = "pprof.enabled"
+	// KeyAnnotationsAllowList is a comma-separated list of glob patterns for
+	// Application annotations that should be transferred between the principal
+	// and its agents in addition to the ones argocd-agent handles itself.
+	KeyAnnotationsAllowList = "application.annotations.allow-list"
 )
 
 // DefaultConfig holds the flag-derived defaults used when a key is absent.
 type DefaultConfig struct {
-	LogLevels    []string
-	FullDetail   []string
-	PprofEnabled bool
+	LogLevels            []string
+	FullDetail           []string
+	PprofEnabled         bool
+	AnnotationsAllowList []string
 }
 
 // Manager applies debug settings to the running process. Safe for concurrent use.
@@ -78,17 +84,26 @@ type Manager struct {
 
 	pprofEnabled atomic.Bool
 
+	// annotationFilter is the live filter shared with the principal or agent.
+	// Applying a new allow list to it takes effect for events already in
+	// flight, which is the point of sourcing the list from the ConfigMap.
+	annotationFilter *manager.AnnotationFilter
+
 	logger *logrus.Entry
 }
 
 // NewManager returns a Manager reading the keys prefixed with keyPrefix, which
 // must be either PrincipalKeyPrefix or AgentKeyPrefix.
-func NewManager(keyPrefix string, dc DefaultConfig, subLoggers *cmdutil.SubSystemLoggers) *Manager {
+//
+// annotationFilter is the filter the component was built with; it may be nil,
+// in which case the annotation allow-list key is ignored.
+func NewManager(keyPrefix string, dc DefaultConfig, subLoggers *cmdutil.SubSystemLoggers, annotationFilter *manager.AnnotationFilter) *Manager {
 	m := &Manager{
-		keyPrefix:     keyPrefix,
-		defaultConfig: dc,
-		subLoggers:    subLoggers,
-		logger:        logrus.WithField("module", "Settings"),
+		keyPrefix:        keyPrefix,
+		defaultConfig:    dc,
+		subLoggers:       subLoggers,
+		annotationFilter: annotationFilter,
+		logger:           logrus.WithField("module", "Settings"),
 	}
 	m.pprofEnabled.Store(dc.PprofEnabled)
 	return m
@@ -113,6 +128,27 @@ func (m *Manager) Apply(data map[string]string) {
 	m.applyLogLevel(data)
 	m.applyFullDetail(data)
 	m.applyPprof(data)
+	m.applyAnnotationsAllowList(data)
+}
+
+// applyAnnotationsAllowList reconciles the Application annotation allow list
+// with the ConfigMap. Like the full-detail key, a present-but-empty value is
+// authoritative: it is the only way to switch an allow list configured by flag
+// back off again without a restart.
+func (m *Manager) applyAnnotationsAllowList(data map[string]string) {
+	if m.annotationFilter == nil {
+		return
+	}
+	key := m.key(KeyAnnotationsAllowList)
+	patterns := m.defaultConfig.AnnotationsAllowList
+	if val, ok := data[key]; ok {
+		patterns = splitList(val)
+		m.logOverride(key, strings.Join(m.defaultConfig.AnnotationsAllowList, ","), strings.Join(patterns, ","))
+	}
+	// Entries that would capture an annotation argocd-agent depends on are
+	// rejected inside the filter, logged rather than fatal, so a typo here
+	// cannot take the component down.
+	m.annotationFilter.SetAllowList(patterns)
 }
 
 func (m *Manager) applyLogLevel(data map[string]string) {

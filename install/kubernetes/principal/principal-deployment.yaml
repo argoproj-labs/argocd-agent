@@ -45,6 +45,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.log.full-detail
                 optional: true
+          - name: ARGOCD_PRINCIPAL_APPLICATION_ANNOTATIONS_ALLOW_LIST
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.application.annotations.allow-list
+                optional: true
           - name: ARGOCD_PRINCIPAL_METRICS_PORT
             valueFrom:
               configMapKeyRef:
