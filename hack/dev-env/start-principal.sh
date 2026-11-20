@@ -43,7 +43,7 @@ fi
 
 # Point the principal to the e2e test configuration if it exists
 E2E_ENV_FILE="/tmp/argocd-agent-e2e"
-PRINCIPAL_AUTH='mtls:CN=([^,]+)'
+PRINCIPAL_AUTH='mtls:subject:CN=([^,]+)'
 if [ -f "$E2E_ENV_FILE" ]; then
     source "$E2E_ENV_FILE"
     export ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET=${ARGOCD_PRINCIPAL_ENABLE_WEBSOCKET:-false}

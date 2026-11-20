@@ -303,8 +303,8 @@ principal:
     # -- Path to the SPIRE Agent socket directory. Used as the container mountPath and host path.
     hostSocketDir: "/run/spire/agent-sockets"
 
-  # -- Authentication method. Formats: "mtls:CN=([^,]+)", "userpass:/path/to/creds", "spiffe-jwt:spiffe://...".
-  auth: "mtls:CN=([^,]+)"
+  # -- Authentication method. Formats: "mtls:subject:CN=([^,]+)", "userpass:/path/to/creds", "spiffe-jwt:spiffe://...".
+  auth: "mtls:subject:CN=([^,]+)"
 
   websocket:
     # -- Enable WebSocket for streaming events to agents.
