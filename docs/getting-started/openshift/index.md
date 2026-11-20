@@ -94,7 +94,7 @@ oc create secret generic argocd-redis -n argocd --from-literal=auth="$(oc get se
 
 argocd-agent supports two mapping modes for routing Applications to managed agents:
 
-- **Namespace-based mapping** (default): Each agent has a dedicated namespace on the control plane. Applications placed in that namespace are routed to the agent. No additional configuration required.
+- **Namespace-based mapping** (deprecated, the default before v1.0.0): Each agent has a dedicated namespace on the control plane. Applications placed in that namespace are routed to the agent. Requires `--destination-based-mapping=false` on the principal and the agent.
 - **Destination-based mapping**: Applications use `spec.destination.name` to target an agent, regardless of their namespace. Better multi-tenancy support and familiar to traditional Argo CD users.
 
 To enable destination-based mapping, set the corresponding fields in the ArgoCD CR on both clusters. Both sides must have it enabled. These CR fields require **argocd-operator v0.18.0** or later.

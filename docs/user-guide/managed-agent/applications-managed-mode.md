@@ -8,7 +8,7 @@ For **autonomous** agents, see [Application synchronization (autonomous agents)]
 
 Application synchronization in argocd-agent supports two mapping modes that determine how Applications are routed to agents:
 
-- **Namespace-based mapping** (default): Applications are mapped to agents using **namespaces**, where each namespace on the principal corresponds to a specific agent.
+- **Namespace-based mapping** (deprecated, the default before v1.0.0): Applications are mapped to agents using **namespaces**, where each namespace on the principal corresponds to a specific agent.
 - **Destination-based mapping**: Applications are mapped to agents using `spec.destination.name`, allowing multiple namespaces to route to the same agent.
 
 For managed agents, Applications are created on the principal and distributed to agents; agents send status updates back to the principal.
@@ -22,10 +22,10 @@ For managed agents, Applications are created on the principal and distributed to
 
 In managed mode, Applications are created on the **principal cluster** (control plane). The principal determines which agent should receive an Application based on the active mapping mode:
 
-- **Namespace-based mapping** (default): The Application's namespace determines the target agent
+- **Namespace-based mapping** (deprecated, the default before v1.0.0): The Application's namespace determines the target agent
 - **Destination-based mapping**: The Application's `spec.destination.name` determines the target agent
 
-### Namespace-Based Mapping (Default)
+### Namespace-Based Mapping (Deprecated)
 
 #### Namespace to Agent Mapping
 

@@ -4,7 +4,7 @@ This document explains how the principal handles namespaces, how to configure na
 
 ## Namespace Model Overview
 
-By default, argocd-agent uses a "namespace per agent" model on the control plane cluster (**namespace-based mapping**). Each agent that connects to the principal has a corresponding namespace where its Applications are stored.
+With **namespace-based mapping** (the default before v1.0.0, deprecated since), argocd-agent uses a "namespace per agent" model on the control plane cluster. Each agent that connects to the principal has a corresponding namespace where its Applications are stored.
 
 !!! tip "Alternative: Destination-Based Mapping"
     argocd-agent also supports **destination-based mapping**, where applications use `spec.destination.name` on the principal to specify the target agent. See [Agent Mapping Modes](../user-guide/managed-agent/agent-mapping.md) for a comparison.

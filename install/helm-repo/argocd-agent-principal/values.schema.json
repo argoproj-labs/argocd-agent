@@ -441,7 +441,7 @@
           "type": "object"
         },
         "destinationBasedMapping": {
-          "default": false,
+          "default": true,
           "description": "Route applications to agents based on spec.destination.name.",
           "title": "destinationBasedMapping",
           "type": "boolean"
