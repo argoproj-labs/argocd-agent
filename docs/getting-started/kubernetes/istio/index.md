@@ -178,7 +178,7 @@ This configuration includes:
 !!! warning "Critical Component Placement"
     In the setup described in this guide, the **argocd-application-controller** is **not** deployed on the control plane cluster. It runs on the workload clusters, where it has direct access to manage Kubernetes resources.
 
-    If you need an application controller on the control plane cluster, for example to use app-of-apps with managed agents or to run argocd-agent alongside an existing Argo CD installation, see the [Hybrid Architecture](../../../user-guide/managed-agent/hybrid-architecture.md) guide.
+    If you need an application controller on the control plane cluster, for example to use app-of-apps with managed agents or to run argocd-agent alongside an existing Argo CD installation, see the [Hybrid Architecture](../../../user-guide/managed-agent/hybrid-architecture.md) guide, which assumes an existing Argo CD installation (including an application controller) on the control plane cluster.
 
 ### Configure Apps-in-Any-Namespace
 ```bash
