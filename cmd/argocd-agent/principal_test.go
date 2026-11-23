@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
@@ -147,8 +148,19 @@ func TestHAAllowedReplicationClientsFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			const envKey = "ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS"
 			if tt.envVal != nil {
-				t.Setenv("ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS", *tt.envVal)
+				t.Setenv(envKey, *tt.envVal)
+			} else {
+				prev, hadEnv := os.LookupEnv(envKey)
+				require.NoError(t, os.Unsetenv(envKey))
+				t.Cleanup(func() {
+					if hadEnv {
+						_ = os.Setenv(envKey, prev)
+					} else {
+						_ = os.Unsetenv(envKey)
+					}
+				})
 			}
 
 			cmd := NewPrincipalRunCommand()
