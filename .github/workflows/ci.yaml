@@ -207,7 +207,20 @@ jobs:
       - name: Install microk8s
         run: |
           set -x
-          sudo snap install --classic --channel 1.31/stable microk8s
+          # Retry with a backoff to avoid failing the whole e2e job on a transient network error.
+          for attempt in 1 2 3 4 5; do
+            if sudo snap install --classic --channel 1.31/stable microk8s; then
+              break
+            fi
+            if [ "${attempt}" = "5" ]; then
+              echo "snap install microk8s failed after ${attempt} attempts" >&2
+              exit 1
+            fi
+            echo "snap install microk8s failed (attempt ${attempt}), retrying in $((attempt * 5))s"
+            sudo snap remove --purge microk8s || true
+            sleep $((attempt * 5))
+          done
+          sudo microk8s status --wait-ready --timeout 300
           sudo microk8s enable metallb:192.168.56.100-192.168.56.254
           sudo microk8s enable hostpath-storage
           mkdir -p $HOME/.kube
