@@ -736,7 +736,7 @@ Address of the peer principal's gRPC server (`host:port`). Required on the repli
 | **Type** | String slice (comma-separated) |
 | **Default** | `[]` |
 
-Explicit allowlist of peer identities permitted for replication.
+Explicit allowlist of peer identities permitted for replication. When unset or empty, all replication requests are denied (secure by default).
 
 ### HA Admin Port
 

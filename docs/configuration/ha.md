@@ -59,9 +59,12 @@ Address of the peer principal's gRPC server. Required on the replica; optional o
 | **CLI Flag** | `--ha-allowed-replication-clients` |
 | **Environment Variable** | `ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS` |
 | **Type** | String slice (comma-separated) |
-| **Default** | `[]` (any authenticated peer allowed) |
+| **Default** | `[]` (all replication requests denied) |
 
 Explicit allowlist of peer identities permitted to connect for replication. Identities are extracted using the server's `--auth` method.
+
+!!! warning "Secure by Default"
+    When `--ha-allowed-replication-clients` / `ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS` is unset or empty, all replication requests are denied. You must explicitly list authorized HA peer identities to allow replication.
 
 **Example:** `region-b,principal-replica`
 

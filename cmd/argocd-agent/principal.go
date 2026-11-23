@@ -49,6 +49,47 @@ import (
 	"github.com/spiffe/go-spiffe/v2/bundle/jwtbundle"
 )
 
+type haFlagOptions struct {
+	enabled                      bool
+	preferredRole                string
+	peerAddress                  string
+	failoverTimeout              time.Duration
+	adminPort                    int
+	allowedReplicationClients    []string
+	replicationInitialAckTimeout time.Duration
+	adminAuth                    string
+	adminTLSCert                 string
+	adminTLSKey                  string
+	adminCA                      string
+}
+
+func buildHAOptions(cfg haFlagOptions) []ha.Option {
+	haOpts := []ha.Option{ha.WithEnabled(cfg.enabled)}
+	if cfg.preferredRole != "" {
+		haOpts = append(haOpts, ha.WithPreferredRole(cfg.preferredRole))
+	}
+	if cfg.peerAddress != "" {
+		haOpts = append(haOpts, ha.WithPeerAddress(cfg.peerAddress))
+	}
+	if cfg.failoverTimeout > 0 {
+		haOpts = append(haOpts, ha.WithFailoverTimeout(cfg.failoverTimeout))
+	}
+	if cfg.adminPort > 0 {
+		haOpts = append(haOpts, ha.WithAdminPort(cfg.adminPort))
+	}
+	haOpts = append(haOpts, ha.WithAllowedReplicationClients(cfg.allowedReplicationClients))
+	if cfg.replicationInitialAckTimeout > 0 {
+		haOpts = append(haOpts, ha.WithReplicationInitialAckTimeout(cfg.replicationInitialAckTimeout))
+	}
+	if cfg.adminAuth != "" {
+		haOpts = append(haOpts, ha.WithAdminAuth(cfg.adminAuth))
+	}
+	if cfg.adminTLSCert != "" || cfg.adminTLSKey != "" || cfg.adminCA != "" {
+		haOpts = append(haOpts, ha.WithAdminTLS(cfg.adminTLSCert, cfg.adminTLSKey, cfg.adminCA))
+	}
+	return haOpts
+}
+
 // NewPrincipalRunCommand returns a new principal run command.
 func NewPrincipalRunCommand() *cobra.Command {
 	var (
@@ -545,31 +586,19 @@ func NewPrincipalRunCommand() *cobra.Command {
 			}
 
 			if haEnabled {
-				haOpts := []ha.Option{ha.WithEnabled(true)}
-				if haPreferredRole != "" {
-					haOpts = append(haOpts, ha.WithPreferredRole(haPreferredRole))
-				}
-				if haPeerAddress != "" {
-					haOpts = append(haOpts, ha.WithPeerAddress(haPeerAddress))
-				}
-				if haFailoverTimeout > 0 {
-					haOpts = append(haOpts, ha.WithFailoverTimeout(haFailoverTimeout))
-				}
-				if haAdminPort > 0 {
-					haOpts = append(haOpts, ha.WithAdminPort(haAdminPort))
-				}
-				if len(haAllowedReplClients) > 0 {
-					haOpts = append(haOpts, ha.WithAllowedReplicationClients(haAllowedReplClients))
-				}
-				if haReplicationInitialAckTimeout > 0 {
-					haOpts = append(haOpts, ha.WithReplicationInitialAckTimeout(haReplicationInitialAckTimeout))
-				}
-				if haAdminAuth != "" {
-					haOpts = append(haOpts, ha.WithAdminAuth(haAdminAuth))
-				}
-				if haAdminTLSCert != "" || haAdminTLSKey != "" || haAdminCA != "" {
-					haOpts = append(haOpts, ha.WithAdminTLS(haAdminTLSCert, haAdminTLSKey, haAdminCA))
-				}
+				haOpts := buildHAOptions(haFlagOptions{
+					enabled:                      true,
+					preferredRole:                haPreferredRole,
+					peerAddress:                  haPeerAddress,
+					failoverTimeout:              haFailoverTimeout,
+					adminPort:                    haAdminPort,
+					allowedReplicationClients:    haAllowedReplClients,
+					replicationInitialAckTimeout: haReplicationInitialAckTimeout,
+					adminAuth:                    haAdminAuth,
+					adminTLSCert:                 haAdminTLSCert,
+					adminTLSKey:                  haAdminTLSKey,
+					adminCA:                      haAdminCA,
+				})
 				opts = append(opts, principal.WithHA(haOpts...))
 				logrus.Infof("HA enabled (preferred-role=%s, peer=%s)", haPreferredRole, haPeerAddress)
 			}
@@ -825,7 +854,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		"Port for the localhost-only HAAdmin gRPC server (0 uses ha.Options default 8405)")
 	command.Flags().StringSliceVar(&haAllowedReplClients, "ha-allowed-replication-clients",
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS", nil, []string{}),
-		"Comma-separated list of peer identities allowed to connect for replication")
+		"Comma-separated list of peer identities allowed to connect for replication (denies all when empty)")
 	command.Flags().DurationVar(&haReplicationInitialAckTimeout, "ha-replication-initial-ack-timeout",
 		env.DurationWithDefault("ARGOCD_PRINCIPAL_HA_REPLICATION_INITIAL_ACK_TIMEOUT", nil, 0),
 		"How long the primary waits for the replica's initial ACK after snapshot fetch (default: 5m)")

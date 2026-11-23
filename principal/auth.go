@@ -25,6 +25,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/session"
 	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/ha"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware/v2"
 	"google.golang.org/grpc"
@@ -158,10 +159,18 @@ func isReplicationMethod(fullMethod string) bool {
 }
 
 // authenticateReplication authenticates a replication request using the
-// server's mTLS auth method (same as agent auth) and optionally checks
-// the extracted identity against the allowed replication clients list.
+// server's mTLS auth method (same as agent auth) and authorizes the extracted
+// identity against the explicit allowed replication clients list. When the
+// allowlist is unset or empty, all replication requests are denied.
 func (s *Server) authenticateReplication(ctx context.Context) error {
-	mtlsMethod := s.authMethods.Method(auth.MethodMTLS)
+	if s.ha == nil || s.ha.Controller == nil {
+		return status.Error(codes.Unimplemented, "replication not enabled")
+	}
+
+	var mtlsMethod auth.Method
+	if s.authMethods != nil {
+		mtlsMethod = s.authMethods.Method(auth.MethodMTLS)
+	}
 	if mtlsMethod == nil {
 		return status.Errorf(codes.Unauthenticated, "replication requires mTLS auth but no mtls method configured")
 	}
@@ -172,16 +181,18 @@ func (s *Server) authenticateReplication(ctx context.Context) error {
 		return status.Errorf(codes.Unauthenticated, "replication auth failed: %v", err)
 	}
 
-	allowed := s.ha.Controller.Options().AllowedReplicationClients
-	if len(allowed) > 0 {
-		if slices.Contains(allowed, identity) {
-			return nil
-		}
-		log().WithField("identity", identity).Warn("Replication request rejected: identity not in allowed clients")
-		return status.Errorf(codes.PermissionDenied, "identity %q not in allowed replication clients", identity)
+	allowed := ha.NormalizeAllowedReplicationClients(s.ha.Controller.Options().AllowedReplicationClients)
+	if len(allowed) == 0 {
+		log().WithField("identity", identity).Warn("Replication request rejected: no allowed replication clients configured")
+		return status.Error(codes.PermissionDenied, "allowed replication clients not configured; all replication requests are denied")
 	}
 
-	return nil
+	if identity != "" && slices.Contains(allowed, identity) {
+		return nil
+	}
+
+	log().WithField("identity", identity).Warn("Replication request rejected: identity not in allowed clients")
+	return status.Errorf(codes.PermissionDenied, "identity %q not in allowed replication clients", identity)
 }
 
 // unaryAuthInterceptor is a server interceptor for unary gRPC requests.

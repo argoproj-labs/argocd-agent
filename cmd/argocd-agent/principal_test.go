@@ -15,9 +15,12 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/pkg/ha"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -83,4 +86,90 @@ func TestValidateAuthTLSPairing(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHAAllowedReplicationClientsFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		envVal   *string
+		args     []string
+		expected []string
+	}{
+		{
+			name:     "unset CLI flag and unset env var produce empty allowlist",
+			envVal:   nil,
+			args:     nil,
+			expected: nil,
+		},
+		{
+			name:     "empty env var produces empty allowlist",
+			envVal:   ptr(""),
+			args:     nil,
+			expected: nil,
+		},
+		{
+			name:     "whitespace and comma env var produces empty allowlist",
+			envVal:   ptr(" ,  "),
+			args:     nil,
+			expected: nil,
+		},
+		{
+			name:     "empty CLI flag produces empty allowlist",
+			envVal:   nil,
+			args:     []string{"--ha-allowed-replication-clients="},
+			expected: nil,
+		},
+		{
+			name:     "whitespace and comma CLI flag produces empty allowlist",
+			envVal:   nil,
+			args:     []string{"--ha-allowed-replication-clients", " , "},
+			expected: nil,
+		},
+		{
+			name:     "empty CLI flag overrides non-empty env var to empty allowlist",
+			envVal:   ptr("ha-replica"),
+			args:     []string{"--ha-allowed-replication-clients="},
+			expected: nil,
+		},
+		{
+			name:     "env var populates explicit allowlist",
+			envVal:   ptr("ha-replica, peer-2"),
+			args:     nil,
+			expected: []string{"ha-replica", "peer-2"},
+		},
+		{
+			name:     "CLI flag populates explicit allowlist and drops blank items",
+			envVal:   nil,
+			args:     []string{"--ha-allowed-replication-clients", "ha-replica, , peer-2"},
+			expected: []string{"ha-replica", "peer-2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envVal != nil {
+				t.Setenv("ARGOCD_PRINCIPAL_HA_ALLOWED_REPLICATION_CLIENTS", *tt.envVal)
+			}
+
+			cmd := NewPrincipalRunCommand()
+			err := cmd.Flags().Parse(tt.args)
+			require.NoError(t, err)
+
+			clients, err := cmd.Flags().GetStringSlice("ha-allowed-replication-clients")
+			require.NoError(t, err)
+
+			haOpts := buildHAOptions(haFlagOptions{
+				enabled:                   true,
+				preferredRole:             "primary",
+				allowedReplicationClients: clients,
+			})
+			ctrl, err := ha.NewController(context.Background(), haOpts...)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, ctrl.Options().AllowedReplicationClients)
+		})
+	}
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }

@@ -170,6 +170,20 @@ func TestWithAllowedReplicationClients(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, opts.AllowedReplicationClients)
 	})
+
+	t.Run("drops blank and whitespace entries", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAllowedReplicationClients([]string{"", "   ", "\t"})(opts)
+		require.NoError(t, err)
+		assert.Empty(t, opts.AllowedReplicationClients)
+	})
+
+	t.Run("trims whitespace and retains non-empty clients", func(t *testing.T) {
+		opts := DefaultOptions()
+		err := WithAllowedReplicationClients([]string{" region-a ", "", "  ", "region-b\t"})(opts)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"region-a", "region-b"}, opts.AllowedReplicationClients)
+	})
 }
 
 func TestWithAdminAuth(t *testing.T) {
