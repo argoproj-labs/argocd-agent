@@ -62,11 +62,13 @@ The control plane cluster hosts the centralized Argo CD components that provide 
 | **argocd-repo-server** | Git repository access and manifest generation | ✅ Yes |
 | **argocd-redis** | Caching and session storage | ✅ Yes |
 | **argocd-dex-server** | SSO and authentication (optional) | ⚠️ Optional |
-| **argocd-application-controller** | Application reconciliation | ❌ **Not supported** |
+| **argocd-application-controller** | Application reconciliation | ❌ **Not in the default setup** |
 | **argocd-applicationset-controller** | ApplicationSet management | ❌ **Out of scope** |
 
 !!! warning "Application Controller on Control Plane"
-    Running the Argo CD application controller on the control plane cluster is **not currently supported** and is out of scope for this documentation. The application controller must run on workload clusters where it can directly access and manage Kubernetes resources.
+    In the default setup described in this guide, the Argo CD application controller is **not** deployed on the control plane cluster. Applications for agents are reconciled by the application controller on the workload clusters, where it can directly access and manage Kubernetes resources. Running an additional application controller on the control plane would otherwise conflict with the agents.
+
+    If you need an application controller on the control plane cluster, for example to use app-of-apps with managed agents or to run argocd-agent alongside an existing Argo CD installation, see the [Hybrid Architecture](../user-guide/managed-agent/hybrid-architecture.md) guide, which assumes an existing Argo CD installation (including an application controller) on the control plane cluster. It describes the isolation mechanisms (label selectors and the `skip-reconcile` annotation, which requires Argo CD v3.4+) needed to keep the two from conflicting.
 
 ### Workload Cluster Components
 
