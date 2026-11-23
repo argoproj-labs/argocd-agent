@@ -5,8 +5,8 @@ go 1.27.3
 require (
 	github.com/Shopify/toxiproxy/v2 v2.12.0
 	github.com/alicebob/miniredis/v2 v2.40.0
-	github.com/argoproj/argo-cd/gitops-engine/v3 v3.6.1
-	github.com/argoproj/argo-cd/v3 v3.6.1
+	github.com/argoproj/argo-cd/gitops-engine/v3 v3.6.2
+	github.com/argoproj/argo-cd/v3 v3.6.2
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.16.2
 	github.com/cloudevents/sdk-go/v2 v2.16.2
@@ -80,7 +80,7 @@ require (
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/dlclark/regexp2 v1.12.0 // indirect
+	github.com/dlclark/regexp2/v2 v2.13.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
