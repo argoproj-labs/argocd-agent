@@ -54,6 +54,7 @@ namespaceOverride: ""
 
 ```
 tlsSecretName: "argocd-agent-client-tls"
+tlsRootCASecretName: "argocd-agent-ca"
 userPasswordSecretName: "argocd-agent-agent-userpass"
 image: "ghcr.io/argoproj-labs/argocd-agent/argocd-agent"
 imageTag: "latest"
@@ -86,7 +87,10 @@ The Kubernetes namespace where the agent's resources (Deployment, Service, Confi
 tlsSecretName:
 
 Default: "argocd-agent-client-tls"
-The name of the Kubernetes Secret containing TLS client certificates for the agent.
+
+The name of the Kubernetes Secret containing the agent's TLS client certificate and private key.
+
+`tlsRootCASecretName` defaults to `argocd-agent-ca`. This Secret holds only the public CA certificates in PEM format for verifying the principal.
 
 userPasswordSecretName:
 
@@ -165,19 +169,19 @@ tlsClientKeyPath:
 
 Default: ""
 
-Path to a file containing the agent's TLS client certificate.
+Path to a file containing the agent's TLS client private key.
 
 tlsClientCertPath: 
 
 Default: ""
 
-Path to a file containing the agent's TLS client private key.
+Path to a file containing the agent's TLS client certificate.
 
 tlsRootCAPath: 
 
 Default: ""
 
-The path to a file containing the certificates for the TLS root certificate authority used to validate the remote principal. 
+Path to a PEM bundle containing only the public CA certificates used to verify the principal. This setting takes precedence over `tlsRootCASecretName`. See [TLS & Certificates](../../../docs/configuration/tls-certificates.md#agent-client-certificate-reload) for the agent's root CA requirements.
 
 #### Overriding Configuration Values
 You can override any of the default values in values.yaml during installation:

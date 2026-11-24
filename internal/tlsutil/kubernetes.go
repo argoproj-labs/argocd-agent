@@ -111,6 +111,11 @@ func X509CertPoolFromSecret(ctx context.Context, kube kubernetes.Interface, name
 	if err != nil {
 		return nil, fmt.Errorf("could not read secret: %w", err)
 	}
+	return x509CertPoolFromSecretData(secret, fields...)
+}
+
+func x509CertPoolFromSecretData(secret *v1.Secret, fields ...string) (*x509.CertPool, error) {
+	namespace, name := secret.Namespace, secret.Name
 	if len(secret.Data) == 0 {
 		return nil, fmt.Errorf("%s/%s: empty secret", namespace, name)
 	}

@@ -1044,7 +1044,7 @@ func TestCheckConfigPrincipal(t *testing.T) {
 }
 
 func TestCheckConfigAgent(t *testing.T) {
-	t.Run("Valid configuration", func(t *testing.T) {
+	t.Run("Agent CA Secret validation", func(t *testing.T) {
 		agentNS := "argocd"
 		principalNS := "argocd"
 
@@ -1111,16 +1111,6 @@ func TestCheckConfigAgent(t *testing.T) {
 		require.NoError(t, err, "generate CA")
 		mustCreateTLSSecret(t, principalCl, principalNS, config.SecretNamePrincipalCA, caCertPEM, caKeyPEM)
 
-		// Create agent CA secret on agent cluster (opaque with ca.crt)
-		_, err = agentCl.CoreV1().Secrets(agentNS).Create(context.TODO(), &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: config.SecretNameAgentCA, Namespace: agentNS},
-			Type:       corev1.SecretTypeOpaque,
-			Data: map[string][]byte{
-				"ca.crt": []byte(caCertPEM),
-			},
-		}, metav1.CreateOptions{})
-		require.NoError(t, err, "create agent ca secret")
-
 		// Issue a client cert for agent subject
 		caCert, err := tlsutil.TLSCertFromSecret(context.TODO(), principalCl, principalNS, config.SecretNamePrincipalCA)
 		require.NoError(t, err, "read CA")
@@ -1135,9 +1125,61 @@ func TestCheckConfigAgent(t *testing.T) {
 		_, err = principalCl.CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: agentName}}, metav1.CreateOptions{})
 		require.NoError(t, err, "create ns")
 
-		res := RunAgentChecks(context.TODO(), agentKubeClient, agentNS, principalKubeClient, principalNS)
-		for _, r := range res {
-			require.NoError(t, r.err, "check failed: %s", r.name)
+		tests := []struct {
+			name    string
+			data    map[string][]byte
+			wantErr string
+		}{
+			{name: "public CA in ca.crt", data: map[string][]byte{"ca.crt": []byte(caCertPEM)}},
+			{name: "public CA in tls.crt", data: map[string][]byte{"tls.crt": []byte(caCertPEM)}},
+			{
+				name:    "public CA only in an unsupported field",
+				data:    map[string][]byte{"root.pem": []byte(caCertPEM)},
+				wantErr: "Put valid CA certificates in ca.crt or tls.crt",
+			},
+			{
+				name:    "plaintext alongside ca.crt",
+				data:    map[string][]byte{"ca.crt": []byte(caCertPEM), "credentials": []byte("example-text-credential")},
+				wantErr: "contains unexpected text outside PEM blocks in field \"credentials\"",
+			},
+			{
+				name:    "plaintext appended to the CA certificate",
+				data:    map[string][]byte{"ca.crt": []byte(caCertPEM + "example-text-credential\n")},
+				wantErr: "contains unexpected text outside PEM blocks in field \"ca.crt\"",
+			},
+			{
+				name: "signing key alongside ca.crt",
+				data: map[string][]byte{"ca.crt": []byte(caCertPEM), "tls.key": []byte(caKeyPEM)},
+				wantErr: fmt.Sprintf("agent root CA Secret %s/%s contains a private key in field \"tls.key\"",
+					agentNS, config.SecretNameAgentCA),
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				secret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: config.SecretNameAgentCA, Namespace: agentNS},
+					Type:       corev1.SecretTypeOpaque,
+					Data:       tt.data,
+				}
+				_, err := agentCl.CoreV1().Secrets(agentNS).Create(t.Context(), secret, metav1.CreateOptions{})
+				require.NoError(t, err)
+				t.Cleanup(func() {
+					require.NoError(t, agentCl.CoreV1().Secrets(agentNS).Delete(context.Background(), secret.Name, metav1.DeleteOptions{}))
+				})
+
+				var checkErrors []error
+				for _, check := range RunAgentChecks(t.Context(), agentKubeClient, agentNS, principalKubeClient, principalNS) {
+					if check.err != nil {
+						checkErrors = append(checkErrors, check.err)
+					}
+				}
+				if tt.wantErr == "" {
+					require.Empty(t, checkErrors)
+					return
+				}
+				require.Len(t, checkErrors, 1)
+				require.ErrorContains(t, checkErrors[0], tt.wantErr)
+			})
 		}
 	})
 

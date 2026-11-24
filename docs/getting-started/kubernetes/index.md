@@ -292,7 +292,11 @@ argocd-agentctl pki issue agent my-first-agent \
   --upsert
 ```
 
+This command installs two Secrets in the workload cluster. `argocd-agent-client-tls` holds the agent's certificate and private key, and `argocd-agent-ca` holds only the public CA certificate used to verify the principal.
+
 ### 5.3 Propagate Certificate Authority to Agent
+
+Use this optional step for an existing agent whose public CA Secret is missing. Step 5.2 already creates the Secret for a new agent.
 
 ```bash
 argocd-agentctl pki propagate \
@@ -304,7 +308,7 @@ argocd-agentctl pki propagate \
 
 ### 5.4 Verify Certificate Installation
 
-The agent client certificate should already be installed from step 5.2. Verify it exists:
+Verify that both Secrets exist in the workload cluster.
 
 ```bash
 # Verify the client certificate secret exists
@@ -592,6 +596,9 @@ kubectl logs -n argocd deployment/argocd-application-controller --context <workl
 ```
 
 **Certificate Issues**:
+
+If the agent reports a private key in its root CA source, see [Private Key in Agent Root CA](../../configuration/tls-certificates.md#private-key-in-agent-root-ca).
+
 ```bash
 # Regenerate agent certificate
 argocd-agentctl pki issue agent my-first-agent \

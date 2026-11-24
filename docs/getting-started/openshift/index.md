@@ -16,7 +16,8 @@ Before proceeding with the setup, ensure you have the following:
 Hub cluster will be installed in argocd namespace
 
 Before you install the principal's manifest, you will need to
-- Create a TLS secret containing the public CA certificate used by Argo CD-agent components
+
+- Create a Secret containing the public CA certificates the principal uses to verify agent client certificates
 - Create a TLS secret containing the certificate and private key used by the principal's gRPC service
 - Create a TLS secret containing the certificate and private key used by the principal's resource proxy
 - Create a secret containing the private RSA key used to sign JWT issued by the principal
@@ -156,11 +157,8 @@ kubectl create secret generic argocd-redis -n <workload namespace> --from-litera
 
 ### Configure Agent in managed mode
 
-Before installing agent resources create
-- a TLS secret containing the issued certificate for agent
+Before installing the agent, issue its client certificate from the hub CA. The command creates `argocd-agent-client-tls` with the agent's certificate and private key, and `argocd-agent-ca` with only the public CA certificate, in the workload cluster.
 
-Create the PKI on the agent:
-Run this command while connected to principal
 ```
 argocd-agentctl pki issue agent <agent-name>  --principal-context <principal context> --agent-context <workload context> --agent-namespace <workload namespace> --upsert
 ```
@@ -200,11 +198,8 @@ Also Update RBAC, rolebinding/clusterrolebinding with `workload-namespace`, if p
 
 ### Configure Agent in Autonomous mode
 
-Before installing agent resources create
-Create a TLS secret containing the issued certificate for agent
+Before installing the agent, issue its client certificate from the hub CA. For an autonomous agent, use the same [client and public CA Secrets](../../configuration/tls-certificates.md#step-5-issue-agent-client-certificate) as in managed mode.
 
-Create the PKI on the agent:
-Run this command while connected to principal
 ```
 argocd-agentctl pki issue agent <agent-name> --principal-context <principal context> --agent-context <workload context> --agent-namespace argocd --upsert
 ```

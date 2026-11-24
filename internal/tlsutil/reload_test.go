@@ -15,10 +15,12 @@
 package tlsutil
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -27,6 +29,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -458,6 +461,53 @@ func newFileProvider(t *testing.T) (*TLSFileProvider, tlsFiles) {
 	return NewTLSFileProvider(files.cert, files.key, files.ca, materialFromFiles(t, files)), files
 }
 
+func Test_NewPublicCAFileProvider_LoadsCertificateBundle(t *testing.T) {
+	firstCA, _ := newCertPEM(t, caTempl)
+	secondCA, _ := newCertPEM(t, caTempl)
+	caPath := filepath.Join(t.TempDir(), "ca.crt")
+	require.NoError(t, os.WriteFile(caPath, slices.Concat(firstCA, secondCA), 0o600))
+
+	provider, err := NewPublicCAFileProvider(caPath)
+	require.NoError(t, err)
+	cert, pool := provider.Load()
+
+	want := x509.NewCertPool()
+	require.True(t, want.AppendCertsFromPEM(firstCA))
+	require.True(t, want.AppendCertsFromPEM(secondCA))
+	require.Empty(t, cert.Certificate)
+	require.True(t, want.Equal(pool))
+}
+
+func Test_PublicCAFileProvider_ReloadsRelativePath(t *testing.T) {
+	caPEM, keyPEM := newCertPEM(t, caTempl)
+	const caPath = "ca.crt"
+	dotPath := "." + string(filepath.Separator) + caPath
+
+	tests := []struct {
+		name       string
+		configured string
+		eventName  string
+	}{
+		{name: "event path has a dot prefix", configured: caPath, eventName: dotPath},
+		{name: "configured path has a dot prefix", configured: dotPath, eventName: caPath},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			require.NoError(t, os.WriteFile(caPath, caPEM, 0o600))
+			provider, err := NewPublicCAFileProvider(tt.configured)
+			require.NoError(t, err)
+			before := provider.Material.Load()
+
+			require.NoError(t, os.WriteFile(caPath, slices.Concat(caPEM, keyPEM), 0o600))
+			err = provider.OnChange(t.Context(), fsnotify.Event{Name: tt.eventName, Op: fsnotify.Write})
+
+			require.ErrorContains(t, err, "contains a private key")
+			require.Same(t, before, provider.Material.Load())
+		})
+	}
+}
+
 func Test_TLSFileProvider_Load(t *testing.T) {
 	t.Run("a provider without material returns nothing", func(t *testing.T) {
 		provider := NewTLSFileProvider("cert", "key", "ca", nil)
@@ -731,7 +781,96 @@ const (
 	watchTick    = 20 * time.Millisecond
 )
 
+func Test_PublicCAFileProvider_WatchReloadsCAAtRegistration(t *testing.T) {
+	initialCA, _ := newCertPEM(t, caTempl)
+	replacementCA, replacementKey := newCertPEM(t, caTempl)
+	expiredTemplate := caTempl
+	expiredTemplate.NotAfter = caTempl.NotBefore
+	expiredTemplate.NotBefore = expiredTemplate.NotAfter.Add(-time.Hour)
+	expiredCA, _ := newCertPEM(t, expiredTemplate)
+	replaceBeforeWatch := func(t *testing.T, bundle []byte) *TLSFileProvider {
+		t.Helper()
+		caPath := filepath.Join(t.TempDir(), "ca.crt")
+		require.NoError(t, os.WriteFile(caPath, initialCA, 0o600))
+		provider, err := NewPublicCAFileProvider(caPath)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(caPath, bundle, 0o600))
+		return provider
+	}
+
+	t.Run("loads a replacement containing a current CA and an expired CA", func(t *testing.T) {
+		provider := replaceBeforeWatch(t, slices.Concat(replacementCA, expiredCA))
+		freshProvider, err := NewPublicCAFileProvider(provider.CAPath)
+		require.NoError(t, err)
+		_, want := freshProvider.Load()
+
+		startWatch(t, provider)
+		require.Eventually(t, func() bool {
+			_, pool := provider.Load()
+			return want.Equal(pool)
+		}, watchTimeout, watchTick)
+
+		// Both event paths must accept the same bundle as startup and registration.
+		assert.NoError(t, provider.OnChange(t.Context(), fsnotify.Event{Name: provider.CAPath, Op: fsnotify.Write}))
+		dataLink := filepath.Join(filepath.Dir(provider.CAPath), "..data")
+		assert.NoError(t, provider.OnChange(t.Context(), fsnotify.Event{Name: dataLink, Op: fsnotify.Create}))
+		_, pool := provider.Load()
+		require.True(t, want.Equal(pool))
+	})
+
+	leaf, _ := newCertPEM(t, clientTempl)
+	invalidBundles := []struct {
+		name    string
+		bundle  []byte
+		wantErr string
+	}{
+		{name: "private key", bundle: slices.Concat(replacementCA, replacementKey), wantErr: "contains a private key"},
+		{name: "leaf certificate", bundle: leaf, wantErr: "contains a leaf certificate"},
+		{name: "CA and leaf certificate", bundle: slices.Concat(replacementCA, leaf), wantErr: "contains a leaf certificate"},
+		{name: "bundle of expired CAs", bundle: expiredCA, wantErr: "contains no currently valid CA certificates"},
+	}
+	for _, tt := range invalidBundles {
+		t.Run("rejects a replacement containing a "+tt.name, func(t *testing.T) {
+			provider := replaceBeforeWatch(t, tt.bundle)
+			before := provider.Material.Load()
+
+			_, err := NewPublicCAFileProvider(provider.CAPath)
+			assert.ErrorContains(t, err, tt.wantErr)
+			assert.ErrorContains(t, provider.OnChange(t.Context(), fsnotify.Event{Name: provider.CAPath, Op: fsnotify.Write}), tt.wantErr)
+			assert.ErrorContains(t, provider.Reload(t.Context()), tt.wantErr)
+			require.Same(t, before, provider.Material.Load())
+
+			_, done := startWatch(t, provider)
+			select {
+			case err := <-done:
+				require.ErrorContains(t, err, tt.wantErr)
+				require.Same(t, before, provider.Material.Load())
+			case <-time.After(watchTimeout):
+				t.Fatal("Watch did not reject the replacement CA bundle")
+			}
+		})
+	}
+}
+
 func Test_TLSFileProvider_Watch(t *testing.T) {
+	t.Run("principal starts watching with a mixed-validity CA bundle", func(t *testing.T) {
+		files := writeTLSFiles(t, t.TempDir())
+		validCA, err := os.ReadFile(files.ca)
+		require.NoError(t, err)
+		expiredTemplate := caTempl
+		expiredTemplate.NotAfter = caTempl.NotBefore
+		expiredTemplate.NotBefore = expiredTemplate.NotAfter.Add(-time.Hour)
+		expiredCA, _ := newCertPEM(t, expiredTemplate)
+		require.NoError(t, os.WriteFile(files.ca, slices.Concat(validCA, expiredCA), 0o600))
+		initial := materialFromFiles(t, files)
+		provider := NewTLSFileProvider(files.cert, files.key, files.ca, initial)
+
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		require.NoError(t, provider.Watch(ctx))
+		require.Same(t, initial, provider.Material.Load())
+	})
+
 	t.Run("a directory that does not exist is an error", func(t *testing.T) {
 		existing := t.TempDir()
 		missing := filepath.Join(t.TempDir(), "missing")
@@ -859,6 +998,184 @@ func newSecretFixture(t *testing.T) *secretFixture {
 	require.True(t, pool.AppendCertsFromPEM(caPEM))
 	f.provider = NewTLSSecretProvider(testClientSecret, testCASecret, testSecretNS, f.kube, &TLSMaterial{Cert: cert, CAPool: pool})
 	return f
+}
+
+func Test_NewPublicCASecretProvider(t *testing.T) {
+	caPEM, keyPEM := newCertPEM(t, caTempl)
+	otherCA, _ := newCertPEM(t, caTempl)
+	expiredTemplate := caTempl
+	expiredTemplate.NotAfter = caTempl.NotBefore
+	expiredTemplate.NotBefore = expiredTemplate.NotAfter.Add(-time.Hour)
+	expiredCA, _ := newCertPEM(t, expiredTemplate)
+	leaf, _ := newCertPEM(t, clientTempl)
+	commentedCA := slices.Concat([]byte("# Public CA certificate\n"), caPEM, []byte("\n# End of bundle\n"))
+
+	mixedBundle := slices.Concat(caPEM, expiredCA)
+	validSecrets := []struct {
+		name    string
+		data    map[string][]byte
+		trusted []byte
+	}{
+		{name: "loads certificate from ca.crt", data: map[string][]byte{"ca.crt": commentedCA, "root.pem": otherCA, "empty": nil}, trusted: caPEM},
+		{name: "loads certificate from tls.crt", data: map[string][]byte{"tls.crt": commentedCA, "root.pem": otherCA, "empty": nil}, trusted: caPEM},
+		{name: "loads a bundle with an expired CA", data: map[string][]byte{"ca.crt": mixedBundle}, trusted: mixedBundle},
+		{
+			name:    "preserves the current CA in a mixed field alongside another CA",
+			data:    map[string][]byte{"ca.crt": mixedBundle, "tls.crt": otherCA},
+			trusted: slices.Concat(mixedBundle, otherCA),
+		},
+	}
+	for _, tt := range validSecrets {
+		t.Run(tt.name, func(t *testing.T) {
+			secret := newCASecret(testCASecret, tt.data)
+			kube := fake.NewClientset(secret)
+			want := x509.NewCertPool()
+			require.True(t, want.AppendCertsFromPEM(tt.trusted))
+
+			provider, err := NewPublicCASecretProvider(t.Context(), kube, secret.Namespace, secret.Name)
+			require.NoError(t, err)
+			cert, pool := provider.Load()
+			require.Empty(t, cert.Certificate)
+			require.True(t, want.Equal(pool))
+
+			require.NoError(t, provider.OnChange(secret))
+			_, pool = provider.Load()
+			require.True(t, want.Equal(pool))
+
+			require.NoError(t, provider.Reload(t.Context()))
+			_, pool = provider.Load()
+			require.True(t, want.Equal(pool))
+		})
+	}
+
+	invalidSecrets := []struct {
+		name    string
+		data    map[string][]byte
+		wantErr string
+	}{
+		{
+			name:    "a certificate in an unsupported field is insufficient",
+			data:    map[string][]byte{"root.pem": caPEM},
+			wantErr: "Put valid CA certificates in ca.crt or tls.crt",
+		},
+		{
+			name:    "only expired CAs in the supported fields",
+			data:    map[string][]byte{"ca.crt": expiredCA, "root.pem": otherCA},
+			wantErr: "contains no currently valid CA certificates in ca.crt or tls.crt",
+		},
+		{
+			name:    "a leaf in ca.crt alongside a valid tls.crt",
+			data:    map[string][]byte{"ca.crt": leaf, "tls.crt": otherCA},
+			wantErr: "contains a leaf certificate in field \"ca.crt\"",
+		},
+		{
+			name:    "plaintext in an extra field",
+			data:    map[string][]byte{"ca.crt": caPEM, "credentials": []byte("example-text-credential")},
+			wantErr: "contains unexpected text outside PEM blocks in field \"credentials\"",
+		},
+		{
+			name:    "comments alone in an extra field",
+			data:    map[string][]byte{"ca.crt": caPEM, "description": []byte("# Example CA\n")},
+			wantErr: "contains no PEM certificates in field \"description\"",
+		},
+		{
+			name:    "plaintext next to a certificate",
+			data:    map[string][]byte{"ca.crt": slices.Concat(caPEM, []byte("example-text-credential\n"))},
+			wantErr: "contains unexpected text outside PEM blocks in field \"ca.crt\"",
+		},
+	}
+	for _, tt := range invalidSecrets {
+		t.Run(tt.name, func(t *testing.T) {
+			secret := newCASecret(testCASecret, map[string][]byte{"ca.crt": caPEM})
+			kube := fake.NewClientset(secret)
+			provider, err := NewPublicCASecretProvider(t.Context(), kube, secret.Namespace, secret.Name)
+			require.NoError(t, err)
+			before := provider.Material.Load()
+
+			invalid := newCASecret(testCASecret, tt.data)
+			_, err = kube.CoreV1().Secrets(secret.Namespace).Update(t.Context(), invalid, metav1.UpdateOptions{})
+			require.NoError(t, err)
+
+			_, err = NewPublicCASecretProvider(t.Context(), kube, secret.Namespace, secret.Name)
+			require.ErrorContains(t, err, tt.wantErr)
+			require.EqualError(t, provider.OnChange(invalid), err.Error())
+			require.EqualError(t, provider.Reload(t.Context()), err.Error())
+			require.Same(t, before, provider.Material.Load())
+		})
+	}
+
+	t.Run("signing secret is only accepted by the principal provider", func(t *testing.T) {
+		secret := newTLSSecret(testCASecret, caPEM, keyPEM)
+		kube := fake.NewClientset(secret)
+
+		_, err := NewPublicCASecretProvider(t.Context(), kube, secret.Namespace, secret.Name)
+		require.ErrorContains(t, err, "contains a private key in field \"tls.key\"")
+
+		principalProvider := NewTLSSecretProvider("", secret.Name, secret.Namespace, kube, nil)
+		require.NoError(t, principalProvider.OnChange(secret))
+		_, pool := principalProvider.Load()
+		want := x509.NewCertPool()
+		require.True(t, want.AppendCertsFromPEM(caPEM))
+		require.True(t, want.Equal(pool))
+	})
+}
+
+func Test_PublicCAProviders_RejectDEROutsidePEM(t *testing.T) {
+	caPEM, keyPEM := newCertPEM(t, caTempl)
+	key, _ := pem.Decode(keyPEM)
+	require.NotNil(t, key)
+	bundle := slices.Concat(caPEM, key.Bytes)
+	const wantErr = "contains unexpected binary data"
+
+	t.Run("file", func(t *testing.T) {
+		caPath := filepath.Join(t.TempDir(), "ca.crt")
+		require.NoError(t, os.WriteFile(caPath, caPEM, 0o600))
+		provider, err := NewPublicCAFileProvider(caPath)
+		require.NoError(t, err)
+		before := provider.Material.Load()
+
+		require.NoError(t, os.WriteFile(caPath, bundle, 0o600))
+		_, err = NewPublicCAFileProvider(caPath)
+		assert.ErrorContains(t, err, wantErr)
+		assert.ErrorContains(t, provider.OnChange(t.Context(), fsnotify.Event{Name: caPath, Op: fsnotify.Write}), wantErr)
+		assert.ErrorContains(t, provider.Reload(t.Context()), wantErr)
+		assert.Same(t, before, provider.Material.Load())
+	})
+
+	t.Run("Secret", func(t *testing.T) {
+		secret := newCASecret(testCASecret, map[string][]byte{"ca.crt": caPEM})
+		kube := fake.NewClientset(secret)
+		provider, err := NewPublicCASecretProvider(t.Context(), kube, secret.Namespace, secret.Name)
+		require.NoError(t, err)
+		before := provider.Material.Load()
+
+		secret.Data["ca.crt"] = bundle
+		_, err = kube.CoreV1().Secrets(secret.Namespace).Update(t.Context(), secret, metav1.UpdateOptions{})
+		require.NoError(t, err)
+		_, err = NewPublicCASecretProvider(t.Context(), kube, secret.Namespace, secret.Name)
+		assert.ErrorContains(t, err, wantErr)
+		assert.ErrorContains(t, provider.OnChange(secret), wantErr)
+		assert.ErrorContains(t, provider.Reload(t.Context()), wantErr)
+		assert.Same(t, before, provider.Material.Load())
+	})
+}
+
+func Test_PublicCAFileProvider_RejectsTextOutsidePEM(t *testing.T) {
+	caPEM, _ := newCertPEM(t, caTempl)
+	caPath := filepath.Join(t.TempDir(), "ca.crt")
+	require.NoError(t, os.WriteFile(caPath, caPEM, 0o600))
+	provider, err := NewPublicCAFileProvider(caPath)
+	require.NoError(t, err)
+	before := provider.Material.Load()
+
+	bundle := slices.Concat(caPEM, []byte("example-text-credential\n"))
+	require.NoError(t, os.WriteFile(caPath, bundle, 0o600))
+	_, err = NewPublicCAFileProvider(caPath)
+	const wantErr = "contains unexpected text outside PEM blocks"
+	assert.ErrorContains(t, err, wantErr)
+	assert.ErrorContains(t, provider.OnChange(t.Context(), fsnotify.Event{Name: caPath, Op: fsnotify.Write}), wantErr)
+	assert.ErrorContains(t, provider.Reload(t.Context()), wantErr)
+	assert.Same(t, before, provider.Material.Load())
 }
 
 func Test_TLSSecretProvider_Load(t *testing.T) {
@@ -1124,7 +1441,7 @@ func Test_TLSSecretProvider_Reload(t *testing.T) {
 					_, err := f.kube.CoreV1().Secrets(testSecretNS).Update(context.Background(), newCASecret(testCASecret, map[string][]byte{"other": []byte("x")}), metav1.UpdateOptions{})
 					require.NoError(t, err)
 				},
-				wantErr: "no certs loaded on reload",
+				wantErr: "no certs were found",
 			},
 		}
 		for _, tt := range tests {
@@ -1209,6 +1526,68 @@ func Test_validateNewCACert_Malformed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.ErrorContains(t, validateNewCACert(tt.data), tt.wantErr)
+		})
+	}
+}
+
+func Test_parsePublicCertificates(t *testing.T) {
+	caPEM, keyPEM := newCertPEM(t, caTempl)
+	caBlock, _ := pem.Decode(caPEM)
+	require.NotNil(t, caBlock)
+	pkcs8, _ := pem.Decode(keyPEM)
+	require.NotNil(t, pkcs8)
+
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	ecDER, err := x509.MarshalECPrivateKey(ecKey)
+	require.NoError(t, err)
+	publicDER, err := x509.MarshalPKIXPublicKey(&ecKey.PublicKey)
+	require.NoError(t, err)
+
+	certificateBlock := func(der []byte) []byte {
+		return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	}
+	// The encrypted key label is sufficient to reject the block without decrypting it.
+	encryptedBlock := pem.EncodeToMemory(&pem.Block{Type: "ENCRYPTED PRIVATE KEY", Bytes: []byte("opaque payload")})
+	publicKeyBlock := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})
+	malformedBlock := []byte("-----BEGIN CERTIFICATE-----\ninvalid!\n-----END CERTIFICATE-----\n")
+	crlfCA := bytes.ReplaceAll(caPEM, []byte("\n"), []byte("\r\n"))
+	commentedBundle := slices.Concat([]byte("# Example CA certificate\r\n"), crlfCA, []byte("\r\n\t# Next certificate\r\n"), crlfCA, []byte("\r\n# End of bundle"))
+	plaintext := []byte("example-text-credential\n")
+
+	tests := []struct {
+		name    string
+		data    []byte
+		wantErr string
+	}{
+		{name: "public CA certificate", data: caPEM},
+		{name: "comments and CRLF", data: commentedBundle},
+		{name: "text before a certificate", data: slices.Concat(plaintext, caPEM), wantErr: "contains unexpected text outside PEM blocks"},
+		{name: "text between certificates", data: slices.Concat(caPEM, plaintext, caPEM), wantErr: "contains unexpected text outside PEM blocks"},
+		{name: "text after a certificate", data: slices.Concat(caPEM, plaintext), wantErr: "contains unexpected text outside PEM blocks"},
+		{name: "DER before a certificate", data: slices.Concat(pkcs8.Bytes, []byte("\n"), caPEM), wantErr: "contains unexpected binary data"},
+		{name: "DER between certificates", data: slices.Concat(caPEM, pkcs8.Bytes, []byte("\n"), caPEM), wantErr: "contains unexpected binary data"},
+		{name: "malformed PEM before a certificate", data: slices.Concat(malformedBlock, caPEM), wantErr: "contains malformed PEM data"},
+		{name: "malformed PEM after a certificate", data: slices.Concat(caPEM, malformedBlock), wantErr: "contains malformed PEM data"},
+		{name: "valid certificate with extra DER inside its PEM block", data: slices.Concat(caPEM, certificateBlock(slices.Concat(caBlock.Bytes, pkcs8.Bytes))), wantErr: "contains an invalid or unexpected PEM block"},
+		{name: "public key after a certificate", data: slices.Concat(caPEM, publicKeyBlock), wantErr: "contains an invalid or unexpected PEM block"},
+		{name: "standard private key after a certificate", data: slices.Concat(caPEM, keyPEM), wantErr: "contains a private key"},
+		{name: "encrypted key label", data: encryptedBlock, wantErr: "contains a private key"},
+		{name: "mislabeled PKCS #8 key", data: certificateBlock(pkcs8.Bytes), wantErr: "contains a private key"},
+		{name: "mislabeled PKCS #1 key", data: certificateBlock(x509.MarshalPKCS1PrivateKey(rsaKey)), wantErr: "contains a private key"},
+		{name: "mislabeled SEC 1 key", data: certificateBlock(ecDER), wantErr: "contains a private key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			certs, err := parsePublicCertificates(tt.data)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				require.NotEmpty(t, certs)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
 		})
 	}
 }

@@ -167,7 +167,7 @@ Skip verification of remote TLS certificate. **Development only.**
 | **Type** | String |
 | **Default** | `argocd-agent-ca` |
 
-Name of the secret containing the root CA certificate.
+Name of the Secret containing the public root CA certificate bundle. Put the PEM certificates in `ca.crt` or `tls.crt`. Every nonempty data field must contain at least one PEM certificate. Whitespace and comment lines starting with `#` may accompany the certificates. The agent exits if it finds a private key in this Secret.
 
 ### Root CA Path
 
@@ -179,7 +179,7 @@ Name of the secret containing the root CA certificate.
 | **Type** | String |
 | **Default** | `""` |
 
-Path to file containing root CA certificate for verifying remote TLS.
+Path to a PEM file containing the public root CA certificate bundle for verifying remote TLS. When set, the file takes precedence over the root CA Secret. The agent exits if it finds a private key in this file.
 
 ### TLS Secret Name
 

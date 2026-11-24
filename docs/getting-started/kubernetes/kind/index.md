@@ -421,7 +421,8 @@ argocd-agentctl pki issue agent $AGENT_APP_NAME \
 ```
 
 ### Verify certificate installation
-Verify that Agent client certificates are properly installed:
+
+Verify that both Secrets exist. `argocd-agent-client-tls` contains the agent's certificate and private key. `argocd-agent-ca` is an `Opaque` Secret containing only the public CA certificate in `ca.crt`.
 
 ```bash
 kubectl get secret argocd-agent-client-tls -n $NAMESPACE_NAME --context kind-$AGENT_CLUSTER_NAME
