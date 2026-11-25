@@ -74,6 +74,10 @@ type PrincipalMetrics struct {
 
 	AgentConnectionCount *prometheus.CounterVec
 
+	// ResyncRequests counts resync rounds requested by agents, partitioned
+	// by agent and by result ("accepted" or "refused").
+	ResyncRequests *prometheus.CounterVec
+
 	ResourceProxyRequests *prometheus.CounterVec
 	ResourceProxyErrors   *prometheus.CounterVec
 
@@ -214,6 +218,11 @@ func NewPrincipalMetrics() *PrincipalMetrics {
 			Name: "argocd_principal_agent_connections_total",
 			Help: "The total number of successful connections from each agent to the principal",
 		}, []string{"agent_name"}),
+
+		ResyncRequests: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "argocd_principal_resync_requests_total",
+			Help: "The total number of resync rounds requested by agents, by result (accepted or refused)",
+		}, []string{"agent_name", "result"}),
 
 		ResourceProxyRequests: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "argocd_principal_resource_proxy_requests_total",
