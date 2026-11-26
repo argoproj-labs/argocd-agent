@@ -97,6 +97,14 @@ if [[ ! "${AGENT_KUSTOMIZATION}" =~ "${NEW_TAG#v}" ]]; then
   exit 1
 fi
 
+for CHART in install/helm-repo/argocd-agent-*/Chart.yaml; do
+  CHART_APP_VERSION=$(awk '/^appVersion:/ {print $2}' "${CHART}" | tr -d '"')
+  if [[ "${CHART_APP_VERSION}" != "${NEW_TAG}" ]]; then
+    echo "Error: ${CHART} has appVersion ${CHART_APP_VERSION} and not ${NEW_TAG}, was the init release workflow run?"
+    exit 1
+  fi
+done
+
 echo "> Verifying that tag does not exist on remote"
 if [[ "$(git ls-remote --tags $GIT_REMOTE "$NEW_TAG")" =~ "${NEW_TAG}$" ]]; then
   echo "Error: $NEW_TAG exists on the remote"
