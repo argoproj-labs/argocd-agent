@@ -16,6 +16,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -34,6 +35,11 @@ import (
 
 	format "github.com/cloudevents/sdk-go/binding/format/protobuf/v2"
 )
+
+// errStreamEnded wraps the error from Recv on the event stream. A gRPC client
+// stream is finished once Recv returns an error, whatever its code, so the
+// agent has to subscribe again.
+var errStreamEnded = errors.New("event stream ended")
 
 func (a *Agent) maintainConnection() error {
 	go func() {
@@ -117,12 +123,7 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 	})
 	rcvd, err := stream.Recv()
 	if err != nil {
-		if grpcutil.NeedReconnectOnError(err) {
-			return err
-		} else {
-			logCtx.Errorf("Error while receiving: %v", err)
-			return nil
-		}
+		return fmt.Errorf("%w: %w", errStreamEnded, err)
 	}
 	ev, err := event.FromWire(rcvd.Event)
 	if err != nil {
@@ -170,6 +171,34 @@ func (a *Agent) receiver(stream eventstreamapi.EventStream_SubscribeClient) erro
 	return nil
 }
 
+// receiveEvents receives and processes events from the event stream until the
+// stream ends or the agent disconnects. When the stream ends, it marks the
+// agent disconnected, so that maintainConnection subscribes again.
+func (a *Agent) receiveEvents(logCtx *logrus.Entry, stream eventstreamapi.EventStream_SubscribeClient) {
+	logCtx = logCtx.WithFields(logrus.Fields{
+		"direction": "recv",
+	})
+	logCtx.Info("Starting to receive events from event stream")
+	var err error
+	// Continuously retrieve events from the event stream 'inbox' and process them, while the stream is connected
+	for a.IsConnected() && err == nil {
+		err = a.receiver(stream)
+		if err != nil {
+			if errors.Is(err, errStreamEnded) || grpcutil.NeedReconnectOnError(err) {
+				logCtx.Infof("Reconnecting: %v", err)
+				a.SetConnected(false)
+			} else {
+				logCtx.Errorf("Error while receiving from stream: %v", err)
+			}
+		}
+
+		if a.metrics != nil {
+			// count no of events received from principal
+			a.metrics.EventReceived.Inc()
+		}
+	}
+}
+
 func (a *Agent) handleStreamEvents() error {
 	conn := a.remote.Conn()
 	client := eventstreamapi.NewEventStreamClient(conn)
@@ -177,6 +206,8 @@ func (a *Agent) handleStreamEvents() error {
 	if err != nil {
 		return err
 	}
+	a.streamOpen.Store(true)
+	defer a.streamOpen.Store(false)
 
 	// Per-stream context: cancelled when this stream dies so all child
 	// goroutines (recv, send, heartbeat) exit and don't leak across reconnects.
@@ -212,29 +243,7 @@ func (a *Agent) handleStreamEvents() error {
 	}
 
 	// Receive events from the subscription stream
-	go func() {
-		logCtx := logCtx.WithFields(logrus.Fields{
-			"direction": "recv",
-		})
-		logCtx.Info("Starting to receive events from event stream")
-		var err error
-		// Continuously retrieve events from the event stream 'inbox' and process them, while the stream is connected
-		for a.IsConnected() && err == nil {
-			err = a.receiver(stream)
-			if err != nil {
-				if grpcutil.NeedReconnectOnError(err) {
-					a.SetConnected(false)
-				} else {
-					logCtx.Errorf("Error while receiving from stream: %v", err)
-				}
-			}
-
-			if a.metrics != nil {
-				// count no of events received from principal
-				a.metrics.EventReceived.Inc()
-			}
-		}
-	}()
+	go a.receiveEvents(logCtx, stream)
 
 	// Send events in the sendq to the event stream
 	go func() {
