@@ -61,6 +61,7 @@ nav:
       - Accessing live resources on workload clusters: user-guide/live-resources.md
       - Migration from classical multi-cluster Argo CD: user-guide/migration.md
       - Ignore sync label: user-guide/ignore-sync.md
+      - Application annotation syncing: user-guide/annotation-syncing.md
   - Configuration:
       - Overview: configuration/index.md
       - Authentication: configuration/authentication.md

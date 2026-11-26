@@ -35,6 +35,7 @@ import (
 	"github.com/argoproj-labs/argocd-agent/internal/grpcutil"
 	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/labels"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/profile"
 	"github.com/argoproj-labs/argocd-agent/internal/settings"
 	"github.com/argoproj-labs/argocd-agent/internal/spire"
@@ -83,6 +84,7 @@ func NewPrincipalRunCommand() *cobra.Command {
 		resourceProxyAddress      string
 		pprofPort                 int
 		pprofEnabled              bool
+		annotationsAllowList      []string
 		paramsConfigMap           string
 		resourceProxySecretName   string
 		resourceProxyCertPath     string
@@ -206,11 +208,18 @@ func NewPrincipalRunCommand() *cobra.Command {
 
 			cmdutil.ParseFullDetail(fullDetailCategories)
 
+			// One filter instance is shared by the server and the settings
+			// watcher, so editing the allow list in the params ConfigMap takes
+			// effect without a restart.
+			annotationFilter := manager.NewAnnotationFilter(annotationsAllowList)
+			opts = append(opts, principal.WithAnnotationFilter(annotationFilter))
+
 			settingsManager := settings.NewManager(settings.PrincipalKeyPrefix, settings.DefaultConfig{
-				LogLevels:    logLevels,
-				FullDetail:   fullDetailCategories,
-				PprofEnabled: pprofEnabled,
-			}, &subLoggers)
+				LogLevels:            logLevels,
+				FullDetail:           fullDetailCategories,
+				PprofEnabled:         pprofEnabled,
+				AnnotationsAllowList: annotationsAllowList,
+			}, &subLoggers, annotationFilter)
 
 			if pprofPort > 0 {
 				pprofServer := profile.NewPprofServer(fmt.Sprintf("127.0.0.1:%d", pprofPort), func() bool {
@@ -606,6 +615,9 @@ func NewPrincipalRunCommand() *cobra.Command {
 	command.Flags().StringSliceVar(&fullDetailCategories, "full-detail",
 		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_FULL_DETAIL", nil, nil),
 		"Enable full detail logging for specified categories. Comma-separated list of: "+cmdutil.AvailableFullDetailCategories)
+	command.Flags().StringSliceVar(&annotationsAllowList, "application-annotations-allow-list",
+		env.StringSliceWithDefault("ARGOCD_PRINCIPAL_APPLICATION_ANNOTATIONS_ALLOW_LIST", nil, nil),
+		"Comma-separated list of glob patterns for Application annotations to transfer to agents, in addition to the ones argocd-agent handles itself. Must match the agents' configuration.")
 	command.Flags().StringVar(&paramsConfigMap, "params-configmap",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_PARAMS_CONFIGMAP", nil, settings.DefaultConfigMapName),
 		"Name of the ConfigMap used for principal configurations")

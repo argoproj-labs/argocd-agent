@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"time"
 
@@ -75,6 +76,12 @@ type ApplicationManager struct {
 	// destinationBasedMapping enables destination-based mapping mode where
 	// applications are stored in their original namespace rather than the agent's namespace.
 	destinationBasedMapping bool
+
+	// annotationFilter decides which annotations an update coming from the peer
+	// is allowed to establish, update or remove on the local copy. It is never
+	// nil after NewApplicationManager; a manager built without an explicit
+	// filter gets one with an empty allow list.
+	annotationFilter *manager.AnnotationFilter
 }
 
 // ApplicationManagerOption is a callback function to set an option to the Application
@@ -115,6 +122,14 @@ func WithDestinationBasedMapping(enabled bool) ApplicationManagerOption {
 	}
 }
 
+// WithAnnotationFilter sets the annotation filter used to decide which
+// annotations an incoming update may establish on the local Application.
+func WithAnnotationFilter(f *manager.AnnotationFilter) ApplicationManagerOption {
+	return func(m *ApplicationManager) {
+		m.annotationFilter = f
+	}
+}
+
 // NewApplicationManager initializes and returns a new Manager with the given backend and
 // options.
 func NewApplicationManager(be backend.Application, namespace string, opts ...ApplicationManagerOption) (*ApplicationManager, error) {
@@ -126,6 +141,9 @@ func NewApplicationManager(be backend.Application, namespace string, opts ...App
 	m.ObservedResources = manager.NewObservedResources()
 	m.ManagedResources = manager.NewManagedResources()
 	m.namespace = namespace
+	if m.annotationFilter == nil {
+		m.annotationFilter = manager.NewAnnotationFilter(nil)
+	}
 
 	if m.role == manager.ManagerRolePrincipal && m.mode != manager.ManagerModeUnset {
 		return nil, fmt.Errorf("mode should be unset when role is principal")
@@ -285,8 +303,12 @@ func applyManagedIdentity(existing, incoming *v1alpha1.Application, identity Man
 	if incoming.Annotations == nil {
 		incoming.Annotations = make(map[string]string)
 	}
-	if v, ok := existing.Annotations["argocd.argoproj.io/refresh"]; ok {
-		incoming.Annotations["argocd.argoproj.io/refresh"] = v
+	// Trigger annotations on the agent's copy are retained: the agent's own
+	// application controller is what removes them once it has acted.
+	for _, key := range manager.TriggerAnnotations {
+		if v, ok := existing.Annotations[key]; ok {
+			incoming.Annotations[key] = v
+		}
 	}
 
 	resolved := resolveManagedIdentity(existing, incoming, identity)
@@ -323,6 +345,10 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 	deletionTimestampChanged := false
 
 	updated, originalOnCluster, err := m.update(ctx, m.allowUpsert, incoming, func(existing, incoming *v1alpha1.Application) {
+		// The principal is the source of truth here, but only for the
+		// annotations it is allowed to own. Anything set locally on the agent
+		// survives this update.
+		m.applyPeerAnnotations(existing, incoming, false)
 		applyManagedIdentity(existing, incoming, identity)
 		existing.Annotations = incoming.Annotations
 		existing.Labels = incoming.Labels
@@ -334,6 +360,7 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 			deletionTimestampChanged = true
 		}
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
+		m.applyPeerAnnotations(existing, incoming, false)
 		applyManagedIdentity(existing, incoming, identity)
 
 		if incoming.DeletionTimestamp != nil && existing.DeletionTimestamp == nil {
@@ -485,6 +512,75 @@ func preservePrincipalAnnotations(existing, incoming *v1alpha1.Application) {
 	}
 }
 
+// applyPeerAnnotations rewrites incoming.Annotations to the set that should end
+// up on the local copy of the application, given what arrived from the peer.
+//
+// Annotations the source of truth owns are taken from the peer, including their
+// removal; annotations argocd-agent owns are carried over; everything else on
+// the local object is left alone and everything else on the incoming object is
+// discarded. See the annotation classification in internal/manager for detail.
+//
+// sotOwnsTriggers must be set when the peer is the source of truth for the
+// trigger annotations (refresh and its timestamp). The generic
+// merge deliberately never deletes a preserved key, but a trigger is consumed
+// and removed by whichever application controller acts on it, and that removal
+// has to reach the other side. Without this, a consumed trigger would stick to
+// the peer's copy for ever.
+func (m *ApplicationManager) applyPeerAnnotations(existing, incoming *v1alpha1.Application, sotOwnsTriggers bool) {
+	present := make(map[string]bool, len(manager.TriggerAnnotations))
+	for _, key := range manager.TriggerAnnotations {
+		_, present[key] = incoming.Annotations[key]
+	}
+
+	incoming.Annotations = m.annotationFilter.Merge(existing.Annotations, incoming.Annotations)
+
+	if !sotOwnsTriggers {
+		return
+	}
+	for _, key := range manager.TriggerAnnotations {
+		if !present[key] {
+			delete(incoming.Annotations, key)
+		}
+	}
+}
+
+// syncTriggerAnnotations synchronizes trigger annotations between the
+// incoming and existing applications, leaving all other annotations untouched.
+// When preserveMissing is true, existing trigger annotations are retained if
+// they are absent from the incoming application. Otherwise, missing trigger
+// annotations are removed from the existing application.
+func syncTriggerAnnotations(existing, incoming *v1alpha1.Application, preserveMissing bool) {
+	for _, key := range manager.TriggerAnnotations {
+		value, ok := incoming.Annotations[key]
+		if !ok {
+			if !preserveMissing {
+				delete(existing.Annotations, key)
+			}
+			continue
+		}
+
+		if existing.Annotations == nil {
+			existing.Annotations = make(map[string]string)
+		}
+
+		existing.Annotations[key] = value
+	}
+}
+
+// FilterIncomingAnnotations drops the annotations that must never be
+// established on the local copy of an application that arrived from the peer.
+//
+// This is applied at the inbound event boundary rather than inside Create,
+// because Create is also used to recreate a locally deleted application from
+// the object on this cluster: filtering there would delete the peer's own
+// annotations as a side effect of a revert.
+func (m *ApplicationManager) FilterIncomingAnnotations(app *v1alpha1.Application) {
+	if app == nil {
+		return
+	}
+	app.Annotations = m.annotationFilter.Outbound(app.Annotations)
+}
+
 // UpdateAutonomousApp updates the Application resource on the control plane side
 // when the agent is in autonomous mode. It will update changes to .spec and
 // .status fields along with syncing labels and annotations.
@@ -506,6 +602,11 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 	}
 
 	updated, originalOnCluster, err := m.update(ctx, true, incoming, func(existing, incoming *v1alpha1.Application) {
+		// The autonomous agent is the source of truth, including for the
+		// refresh annotation: its application controller removes the
+		// annotation once it has refreshed, and that removal must land on the
+		// principal rather than leaving a refresh stuck here for ever.
+		m.applyPeerAnnotations(existing, incoming, true)
 		preservePrincipalAnnotations(existing, incoming)
 
 		existing.Annotations = incoming.Annotations
@@ -522,6 +623,7 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		existing.Operation = incoming.Operation.DeepCopy()
 		logCtx.Infof("Updating")
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
+		m.applyPeerAnnotations(existing, incoming, true)
 		preservePrincipalAnnotations(existing, incoming)
 
 		target := &v1alpha1.Application{
@@ -540,6 +642,11 @@ func (m *ApplicationManager) UpdateAutonomousApp(ctx context.Context, namespace 
 		}
 		source := &v1alpha1.Application{
 			ObjectMeta: v1.ObjectMeta{
+				// Annotations are carried on the source side so that the diff
+				// only reports the keys that actually changed. Leaving them out
+				// made every update re-establish the whole map, which is how an
+				// annotation set on the principal used to be silently dropped.
+				Annotations:                existing.Annotations,
 				DeletionTimestamp:          existing.DeletionTimestamp,
 				DeletionGracePeriodSeconds: existing.DeletionGracePeriodSeconds,
 				Finalizers:                 existing.Finalizers,
@@ -587,40 +694,51 @@ func (m *ApplicationManager) UpdateStatus(ctx context.Context, namespace string,
 	}
 
 	updated, originalOnCluster, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
-		preservePrincipalAnnotations(existing, incoming)
-		existing.Annotations = incoming.Annotations
+		// The principal owns a managed application's annotations, so a status
+		// update coming back from the agent must not establish them here. Only
+		// refresh crosses, because the agent's application controller is what
+		// removes it. This mirrors the patch transformer below, which has
+		// always behaved this way.
+		syncTriggerAnnotations(existing, incoming, false)
 		existing.Labels = incoming.Labels
 		existing.Status = *incoming.Status.DeepCopy()
 		existing.Operation = incoming.Operation
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
-		refresh, incomingRefresh := incoming.Annotations["argocd.argoproj.io/refresh"]
-		_, existingRefresh := existing.Annotations["argocd.argoproj.io/refresh"]
+		// The principal owns a managed application's annotations, so only the
+		// trigger annotations may cross back from the agent: the agent's
+		// application controller is what consumes and removes them, and that
+		// has to be reflected here.
+		//
+		// The target annotation map is built from the existing one so that
+		// jsondiff produces the patch. Hand-written
+		// "add /metadata/annotations/<key>" operations are rejected by the API
+		// server when the application has no annotations at all, because JSON
+		// Patch cannot add a key to a map that does not exist.
+		triggers := make(map[string]string, len(existing.Annotations)+len(manager.TriggerAnnotations))
+		for k, v := range existing.Annotations {
+			triggers[k] = v
+		}
+		for _, key := range manager.TriggerAnnotations {
+			if v, ok := incoming.Annotations[key]; ok {
+				triggers[key] = v
+			} else {
+				delete(triggers, key)
+			}
+		}
+
 		target := &v1alpha1.Application{
-			Status:    incoming.Status,
-			Operation: incoming.Operation,
+			ObjectMeta: v1.ObjectMeta{Annotations: triggers},
+			Status:     incoming.Status,
+			Operation:  incoming.Operation,
 		}
 		source := &v1alpha1.Application{
-			Status:    existing.Status,
-			Operation: existing.Operation,
+			ObjectMeta: v1.ObjectMeta{Annotations: existing.Annotations},
+			Status:     existing.Status,
+			Operation:  existing.Operation,
 		}
 		patch, err := jsondiff.Compare(source, target)
 		if err != nil {
 			return nil, err
-		}
-
-		// If the incoming app doesn't have the refresh annotation set, we need
-		// to make sure that we remove it from the version stored on the server
-		// as well.
-		if existingRefresh && !incomingRefresh {
-			patch = append(patch, jsondiff.Operation{Type: "remove", Path: "/metadata/annotations/argocd.argoproj.io~1refresh"})
-		} else if !existingRefresh && incomingRefresh {
-			if len(existing.Annotations) == 0 {
-				// An add below /metadata/annotations is rejected when the
-				// application has no annotations, so the map is added instead.
-				patch = append(patch, jsondiff.Operation{Type: "add", Path: "/metadata/annotations", Value: map[string]string{"argocd.argoproj.io/refresh": refresh}})
-			} else {
-				patch = append(patch, jsondiff.Operation{Type: "add", Path: "/metadata/annotations/argocd.argoproj.io~1refresh", Value: refresh})
-			}
 		}
 
 		// If there is no status yet on our application (this happens when the
@@ -661,30 +779,49 @@ func (m *ApplicationManager) UpdateOperation(ctx context.Context, incoming *v1al
 	}
 
 	updated, originalOnCluster, err := m.update(ctx, false, incoming, func(existing, incoming *v1alpha1.Application) {
-		existing.Annotations = incoming.Annotations
+		// The autonomous agent holds the leading version of this application,
+		// so an update from the principal may deliver an operation and a
+		// refresh request but must not rewrite the agent's annotations. The
+		// patch transformer below already worked this way; this path did not.
+		syncTriggerAnnotations(existing, incoming, true)
 		existing.Labels = incoming.Labels
 		existing.Operation = operationToUse(existing, incoming)
 		existing.Status = *incoming.Status.DeepCopy()
 	}, func(existing, incoming *v1alpha1.Application) (jsondiff.Patch, error) {
-		annotations := make(map[string]string)
-		for k, v := range incoming.Annotations {
-			if k != "argocd.argoproj.io/refresh" {
-				annotations[k] = v
+		// The patch is applied to the application as it exists on this
+		// cluster, so it has to be diffed against that object's annotations
+		// and not against a synthetic copy of the incoming ones.
+		//
+		// Diffing synthetic maps used to emit
+		// "add /metadata/annotations/argocd.argoproj.io~1refresh" even when
+		// the real object had no annotations at all. JSON Patch cannot add a
+		// key to a map that does not exist, so the API server rejected the
+		// whole patch with 422 and the refresh never arrived. Building the
+		// target from the existing annotations makes the diff emit an add of
+		// the entire annotations object in that case, which is valid.
+		target := make(map[string]string, len(existing.Annotations)+1)
+		for k, v := range existing.Annotations {
+			target[k] = v
+		}
+		// The agent owns its own annotations; the principal may only deliver
+		// trigger requests, i.e. a refresh.
+		for _, key := range manager.TriggerAnnotations {
+			if v, ok := incoming.Annotations[key]; ok {
+				target[key] = v
 			}
 		}
-		target := &v1alpha1.Application{
-			ObjectMeta: v1.ObjectMeta{
-				Annotations: incoming.Annotations,
+
+		patch, err := jsondiff.Compare(
+			&v1alpha1.Application{
+				ObjectMeta: v1.ObjectMeta{Annotations: existing.Annotations},
+				Operation:  existing.Operation,
 			},
-			Operation: operationToUse(existing, incoming),
-		}
-		source := &v1alpha1.Application{
-			ObjectMeta: v1.ObjectMeta{
-				Annotations: annotations,
+			&v1alpha1.Application{
+				ObjectMeta: v1.ObjectMeta{Annotations: target},
+				Operation:  operationToUse(existing, incoming),
 			},
-			Operation: existing.Operation,
-		}
-		patch, err := jsondiff.Compare(source, target, jsondiff.SkipCompact())
+			jsondiff.SkipCompact(),
+		)
 		return patch, err
 	})
 	if err == nil {
@@ -852,15 +989,16 @@ func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *
 		existing, ierr := m.applicationBackend.Get(ctxForUpdate, incoming.Name, incoming.Namespace)
 		if ierr != nil {
 			if errors.IsNotFound(ierr) && upsert {
-				updated, ierr = m.Create(ctx, incoming, true)
+				updated, ierr = m.Create(ctx, incoming.DeepCopy(), true)
 				return ierr
 			} else {
 				return fmt.Errorf("error updating application %s: %w", incoming.QualifiedName(), ierr)
 			}
 		} else {
 			originalOnCluster = existing.DeepCopy()
+			incomingCopy := incoming.DeepCopy()
 			if m.applicationBackend.SupportsPatch() && patchFn != nil {
-				patch, err := patchFn(existing, incoming)
+				patch, err := patchFn(existing, incomingCopy)
 				if err != nil {
 					return fmt.Errorf("could not create patch: %w", err)
 				}
@@ -871,7 +1009,7 @@ func (m *ApplicationManager) update(ctx context.Context, upsert bool, incoming *
 				updated, ierr = m.applicationBackend.Patch(ctx, incoming.Name, incoming.Namespace, jsonpatch)
 			} else {
 				if updateFn != nil {
-					updateFn(existing, incoming)
+					updateFn(existing, incomingCopy)
 				}
 				updated, ierr = m.applicationBackend.Update(ctx, existing)
 			}
@@ -933,9 +1071,41 @@ func (m *ApplicationManager) ClearOperationState(ctx context.Context, app *v1alp
 	return nil
 }
 
-// RevertManagedAppChanges compares the actual spec with expected spec stored in cache,
-// if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as principal.
-func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v1alpha1.Application, appCache *cache.ResourceCache[v1alpha1.ApplicationSpec]) bool {
+// restoreFromCache reports whether app drifted from the cached
+// source-of-truth state and, if so, rewrites app to match it.
+//
+// Both the spec and the mirrored annotations are considered. Annotations the
+// source of truth does not own are left untouched, so one that the peer's
+// operator set locally survives the revert.
+func (m *ApplicationManager) restoreFromCache(app *v1alpha1.Application, cached cache.ApplicationState) bool {
+	specDrifted := !reflect.DeepEqual(cached.Spec, app.Spec)
+
+	// Apply the current policy to the cached snapshot before comparing and restoring.
+	mirrored := m.annotationFilter.MirrorOnly(cached.Annotations)
+	annotationsDrifted := !maps.Equal(mirrored, m.annotationFilter.MirrorOnly(app.Annotations))
+
+	if !specDrifted && !annotationsDrifted {
+		return false
+	}
+
+	app.Spec = cached.Spec
+	app.Annotations = m.annotationFilter.RestoreMirrored(app.Annotations, mirrored)
+	return true
+}
+
+// CacheState returns the part of app that the source of truth owns, for
+// storing in the source cache so that later drift on the peer can be detected.
+func (m *ApplicationManager) CacheState(app *v1alpha1.Application) cache.ApplicationState {
+	return cache.ApplicationState{
+		Spec:        app.Spec,
+		Annotations: m.annotationFilter.MirrorOnly(app.Annotations),
+	}
+}
+
+// RevertManagedAppChanges compares the actual spec and mirrored annotations
+// with the ones stored in cache. If they don't match, the application is
+// reverted to be in sync with the cache, which is the same as the principal.
+func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v1alpha1.Application, appCache *cache.ResourceCache[cache.ApplicationState]) bool {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "RevertManagedAppChanges",
 		"application":     app.QualifiedName(),
@@ -944,11 +1114,10 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 
 	sourceUID, exists := app.Annotations[manager.SourceUIDAnnotation]
 	if exists && m.mode == manager.ManagerModeManaged {
-		if cachedAppSpec, ok := appCache.Get(ty.UID(sourceUID)); ok {
+		if cached, ok := appCache.Get(ty.UID(sourceUID)); ok {
 			logCtx.Debugf("Application %s is available in agent cache", app.Name)
 
-			if isEqual := reflect.DeepEqual(cachedAppSpec, app.Spec); !isEqual {
-				app.Spec = cachedAppSpec
+			if m.restoreFromCache(app, cached) {
 				logCtx.Infof("Reverting modifications done in application: %s", app.Name)
 				if _, err := m.UpdateManagedApp(ctx, app, ManagedIdentity{}); err != nil {
 					logCtx.Errorf("Unable to revert modifications done in application: %s. Error: %v", app.Name, err)
@@ -963,9 +1132,11 @@ func (m *ApplicationManager) RevertManagedAppChanges(ctx context.Context, app *v
 	return false
 }
 
-// RevertAutonomousAppChanges compares the actual spec with expected spec stored in cache,
-// if actual spec doesn't match with cache, then it is reverted to be in sync with cache, which is same as agent cluster.
-func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app *v1alpha1.Application, appCache *cache.ResourceCache[v1alpha1.ApplicationSpec]) bool {
+// RevertAutonomousAppChanges compares the actual spec and mirrored
+// annotations with the ones stored in cache. If they don't match, the
+// application is reverted to be in sync with the cache, which is the same as
+// the agent cluster.
+func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app *v1alpha1.Application, appCache *cache.ResourceCache[cache.ApplicationState]) bool {
 	logCtx := log().WithFields(logrus.Fields{
 		"component":       "RevertAutonomousAppChanges",
 		"application":     app.QualifiedName(),
@@ -977,11 +1148,10 @@ func (m *ApplicationManager) RevertAutonomousAppChanges(ctx context.Context, app
 		return false
 	}
 
-	if cachedAppSpec, ok := appCache.Get(ty.UID(sourceUID)); ok {
+	if cached, ok := appCache.Get(ty.UID(sourceUID)); ok {
 		logCtx.Debugf("Application %s is available in agent cache", app.Name)
 
-		if isEqual := reflect.DeepEqual(cachedAppSpec, app.Spec); !isEqual {
-			app.Spec = cachedAppSpec
+		if m.restoreFromCache(app, cached) {
 			logCtx.Infof("Reverting modifications to the application: %s", app.Name)
 			if _, err := m.UpdateAutonomousApp(ctx, app.Namespace, app); err != nil {
 				logCtx.Errorf("Unable to revert modifications done in application: %s. Error: %v", app.Name, err)

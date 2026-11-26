@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/resources"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/google/uuid"
@@ -117,6 +118,24 @@ func (t EventType) String() string {
 // EventSource is a utility to construct new 'cloudevents.Event' events for a given 'source'
 type EventSource struct {
 	source string
+
+	// annotationFilter strips annotations that must not travel to the peer from
+	// every outbound Application event. It may be nil, in which case the
+	// annotation set is sent verbatim.
+	annotationFilter *manager.AnnotationFilter
+}
+
+// EventSourceOption configures an EventSource.
+type EventSourceOption func(*EventSource)
+
+// WithAnnotationFilter makes the EventSource strip ignored annotations from the
+// Applications it serialises. Applying it here rather than at each call site
+// covers every emission path -- informer callbacks, resync and operation events
+// alike -- from a single place.
+func WithAnnotationFilter(f *manager.AnnotationFilter) EventSourceOption {
+	return func(evs *EventSource) {
+		evs.annotationFilter = f
+	}
 }
 
 // Event is the 'on the wire' representation of an event, and is parsed by from protobuf via FromWire
@@ -136,9 +155,12 @@ func (ev *Event) SetEvent(e *cloudevents.Event) {
 	ev.event = e
 }
 
-func NewEventSource(source string) *EventSource {
+func NewEventSource(source string, opts ...EventSourceOption) *EventSource {
 	ev := &EventSource{}
 	ev.source = source
+	for _, o := range opts {
+		o(ev)
+	}
 	return ev
 }
 
@@ -168,8 +190,24 @@ func (evs EventSource) ApplicationEvent(evType EventType, app *v1alpha1.Applicat
 	cev.SetDataSchema(targets.Application.String())
 	cev.SetSubject(fmt.Sprintf("%s/%s", app.Namespace, app.Name))
 	// TODO: Handle this error situation?
-	_ = cev.SetData(cloudevents.ApplicationJSON, app)
+	_ = cev.SetData(cloudevents.ApplicationJSON, evs.filterAnnotations(app))
 	return &cev
+}
+
+// filterAnnotations returns app with the annotations that must not be
+// transferred removed. The object is copied first: callers hand us the live
+// object out of an informer cache, which must never be mutated.
+func (evs EventSource) filterAnnotations(app *v1alpha1.Application) *v1alpha1.Application {
+	if evs.annotationFilter == nil || app == nil {
+		return app
+	}
+	filtered := evs.annotationFilter.Outbound(app.Annotations)
+	if len(filtered) == len(app.Annotations) {
+		return app
+	}
+	out := app.DeepCopy()
+	out.Annotations = filtered
+	return out
 }
 
 func createResourceID(res v1.ObjectMeta) string {

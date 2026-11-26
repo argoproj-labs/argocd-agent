@@ -1724,7 +1724,7 @@ func TestServer_updateAppCallback(t *testing.T) {
 		}
 
 		sourceUID := k8stypes.UID(oldApp.Annotations[manager.SourceUIDAnnotation])
-		s.sourceCache.Application.Set(sourceUID, oldApp.Spec)
+		s.sourceCache.Application.Set(sourceUID, s.appManager.CacheState(oldApp))
 		defer s.sourceCache.Application.Delete(sourceUID)
 
 		mockBackend.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(oldApp, nil)
@@ -1958,6 +1958,127 @@ func TestServer_updateAppCallback(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, app.Operation)
 		sendQ.Done(ev)
+	})
+
+	t.Run("autonomous agent still receives SetOperation when annotation drift is reverted", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd", application.WithRole(manager.ManagerRolePrincipal))
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
+			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
+			sourceCache:  cache.NewSourceCache(),
+		}
+
+		err = s.queues.Create("autonomous-agent")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "1",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation:                 "uid-123",
+					v1alpha1.AnnotationKeyManifestGeneratePaths: ".",
+				},
+			},
+		}
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation:                 "uid-123",
+					v1alpha1.AnnotationKeyManifestGeneratePaths: "/drifted",
+				},
+			},
+			Operation: &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{Revision: "HEAD"},
+			},
+		}
+
+		revertedOnCluster := oldApp.DeepCopy()
+		revertedOnCluster.ResourceVersion = "3"
+		revertedOnCluster.Operation = newApp.Operation.DeepCopy()
+
+		sourceUID := k8stypes.UID(oldApp.Annotations[manager.SourceUIDAnnotation])
+		s.sourceCache.Application.Set(sourceUID, s.appManager.CacheState(oldApp))
+		defer s.sourceCache.Application.Delete(sourceUID)
+
+		mockBackend.On("Get", mock.Anything, "test-app", "autonomous-agent").Return(newApp.DeepCopy(), nil).Once()
+		mockBackend.On("SupportsPatch").Return(true).Once()
+		mockBackend.On("Patch", mock.Anything, "test-app", "autonomous-agent", mock.Anything).Return(revertedOnCluster, nil).Once()
+
+		s.updateAppCallback(oldApp, newApp)
+
+		sendQ := s.queues.SendQ("autonomous-agent")
+		require.Equal(t, 1, sendQ.Len(), "only SetOperation should be queued; SpecUpdate with drifted annotations must not be sent")
+
+		ev, _ := sendQ.Get()
+		assert.Equal(t, event.SetOperation.String(), ev.Type())
+		app := &v1alpha1.Application{}
+		err = json.Unmarshal(ev.Data(), app)
+		require.NoError(t, err)
+		require.NotNil(t, app.Operation)
+		assert.Equal(t, newApp.Operation, app.Operation)
+		assert.Equal(t, ".", app.Annotations[v1alpha1.AnnotationKeyManifestGeneratePaths],
+			"SetOperation must not carry drifted annotations")
+		sendQ.Done(ev)
+	})
+
+	t.Run("autonomous agent does not dispatch SetOperation or revert for an already-ignored resourceVersion", func(t *testing.T) {
+		mockBackend := &mocks.Application{}
+
+		appManager, err := application.NewApplicationManager(mockBackend, "argocd", application.WithRole(manager.ManagerRolePrincipal))
+		require.NoError(t, err)
+
+		s := &Server{
+			ctx:          context.Background(),
+			queues:       queue.NewSendRecvQueues(),
+			events:       event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{"autonomous-agent": types.AgentModeAutonomous},
+			appManager:   appManager,
+			resources:    resources.NewAgentResources(),
+			sourceCache:  cache.NewSourceCache(),
+		}
+
+		err = s.queues.Create("autonomous-agent")
+		require.NoError(t, err)
+
+		oldApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "1",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation:                 "uid-123",
+					v1alpha1.AnnotationKeyManifestGeneratePaths: ".",
+				},
+			},
+		}
+		newApp := &v1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-app", Namespace: "autonomous-agent", ResourceVersion: "2",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation:                 "uid-123",
+					v1alpha1.AnnotationKeyManifestGeneratePaths: "/drifted",
+				},
+			},
+			Operation: &v1alpha1.Operation{
+				Sync: &v1alpha1.SyncOperation{Revision: "HEAD"},
+			},
+		}
+
+		require.NoError(t, s.appManager.IgnoreChange(newApp.QualifiedName(), newApp.ResourceVersion))
+		s.sourceCache.Application.Set("uid-123", s.appManager.CacheState(oldApp))
+
+		s.updateAppCallback(oldApp, newApp)
+
+		sendQ := s.queues.SendQ("autonomous-agent")
+		assert.Equal(t, 0, sendQ.Len())
+		mockBackend.AssertNotCalled(t, "Get", mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("send terminate operation event if the operation is terminating", func(t *testing.T) {

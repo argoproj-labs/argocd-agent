@@ -182,6 +182,20 @@ principal:
     # restart.
     fullDetail: ""
 
+  application:
+    # -- Comma-separated glob patterns for Application annotations to transfer
+    # between the principal and its agents, in addition to the ones
+    # argocd-agent handles itself (notice.argocd.argoproj.io/*,
+    # manifest-generate-paths, skip-reconcile and refresh). Unmatched
+    # annotations are left untouched on both sides and are not sent in events.
+    # Patterns capturing annotations argocd-agent depends on, or ones only
+    # meaningful on a child Application, are rejected and logged. The agents
+    # must be configured with the same list. Applied at runtime: editing
+    # principal.application.annotations.allow-list in the params ConfigMap
+    # takes effect without a restart.
+    # E.g. "argocd-image-updater.argoproj.io/*"
+    annotationsAllowList: ""
+
   metrics:
     # -- Metrics server port.
     port: 8000

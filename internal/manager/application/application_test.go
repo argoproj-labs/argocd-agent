@@ -35,6 +35,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	synccommon "github.com/argoproj/argo-cd/gitops-engine/v3/pkg/sync/common"
+	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
 	"github.com/argoproj/argo-cd/v3/util/settings"
@@ -270,8 +271,11 @@ func Test_ManagerUpdateManaged(t *testing.T) {
 		// Finalizers must be in sync
 		require.Equal(t, incoming.Finalizers, updated.Finalizers)
 
-		// Non-refresh annotations must be in sync with incoming
-		require.Equal(t, incoming.Annotations["bar"], updated.Annotations["bar"])
+		// "bar" is not an annotation argocd-agent transfers, so the agent's
+		// own value survives the update instead of being replaced by the
+		// principal's. Asserted against a literal rather than against
+		// incoming.Annotations, which the update mutates in place.
+		require.Equal(t, "bar", updated.Annotations["bar"])
 		// Refresh annotation must not be removed
 		require.Contains(t, updated.Annotations, "argocd.argoproj.io/refresh")
 		// Status must not have been touched
@@ -519,8 +523,9 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 					// incoming application does not carry these annotations.
 					manager.SourceUIDAnnotation: "12345",
 					manager.NotifiedAnnotation:  `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`,
-					// A stale value the agent has since changed: the incoming
-					// value must win for annotations the agent owns.
+					// An unknown annotation on the principal. The principal is
+					// the source of truth for a managed application, so a
+					// status update from the agent must not change it.
 					"bar": "baz",
 				},
 			},
@@ -538,9 +543,9 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		}
 
 		appC, ai := fakeInformer(t, "", existing)
-		// usePatch=false exercises the update path, which inherits the
-		// incoming annotation set and is where preservation must happen; the
-		// patch path never touches annotations except the refresh marker.
+		// usePatch=false exercises the update path, which used to inherit the
+		// incoming annotation set wholesale; the patch path never touched
+		// annotations except the refresh marker. Both must now agree.
 		be := application.NewKubernetesBackend(appC, "", ai, false)
 		mgr, err := NewApplicationManager(be, "argocd")
 		require.NoError(t, err)
@@ -551,7 +556,8 @@ func Test_ManagerUpdateStatus(t *testing.T) {
 		require.NotNil(t, updated)
 		assert.Equal(t, "12345", updated.Annotations[manager.SourceUIDAnnotation])
 		assert.Equal(t, `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`, updated.Annotations[manager.NotifiedAnnotation])
-		assert.Equal(t, "foo", updated.Annotations["bar"])
+		assert.Equal(t, "baz", updated.Annotations["bar"],
+			"an unknown annotation on the principal must survive a status update from the agent")
 	})
 }
 
@@ -653,8 +659,9 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 					// incoming application does not carry these annotations.
 					manager.SourceUIDAnnotation: "12345",
 					manager.NotifiedAnnotation:  `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`,
-					// A stale value the agent has since changed: the incoming
-					// value must win for annotations the agent owns.
+					// An unknown annotation on the principal. Even though the
+					// autonomous agent is the source of truth, unknown keys are
+					// never transferred, so this one is left alone.
 					"bar": "baz",
 				},
 			},
@@ -681,7 +688,8 @@ func Test_ManagerUpdateAutonomous(t *testing.T) {
 		require.NotNil(t, updated)
 		assert.Equal(t, "12345", updated.Annotations[manager.SourceUIDAnnotation])
 		assert.Equal(t, `{"cd6b8a91cf6b8a4b1e0b4d0e:app-deployed":{"state":"delivered"}}`, updated.Annotations[manager.NotifiedAnnotation])
-		assert.Equal(t, "foo", updated.Annotations["bar"])
+		assert.Equal(t, "baz", updated.Annotations["bar"],
+			"an unknown annotation must not be transferred, in either direction")
 	})
 
 	t.Run("Retain principal-owned annotations without patch support", func(t *testing.T) {
@@ -1220,7 +1228,7 @@ func Test_RevertManagedAppChanges(t *testing.T) {
 		sourceCache := cache.NewSourceCache()
 
 		// Store app spec in cache
-		sourceCache.Application.Set("some_uid", app.Spec)
+		sourceCache.Application.Set("some_uid", mgr.CacheState(app))
 
 		reverted := mgr.RevertManagedAppChanges(context.Background(), app, sourceCache.Application)
 		require.False(t, reverted)
@@ -1382,10 +1390,12 @@ func newDriftedApp() *v1alpha1.Application {
 	return app
 }
 
-func newSpecCache(spec *v1alpha1.ApplicationSpec) *cache.ResourceCache[v1alpha1.ApplicationSpec] {
+func newSpecCache(spec *v1alpha1.ApplicationSpec) *cache.ResourceCache[cache.ApplicationState] {
 	c := cache.NewSourceCache()
 	if spec != nil {
-		c.Application.Set("source-uid", *spec)
+		c.Application.Set("source-uid", cache.ApplicationState{
+			Spec: *spec,
+		})
 	}
 	return c.Application
 }
@@ -1884,7 +1894,10 @@ func Test_ApplicationManager_UpdateManagedApp_Details(t *testing.T) {
 		be, m := newMockedAppManager(t, managedAgentOpts()...)
 		incoming := newTestApp("app")
 		incoming.Labels = map[string]string{"new": "label"}
-		incoming.Annotations = map[string]string{"new": "annotation"}
+		incoming.Annotations = map[string]string{
+			common.AnnotationKeyAppSkipReconcile: "true",
+			"new":                                "annotation",
+		}
 		incoming.Finalizers = []string{"new-finalizer"}
 		incoming.Spec.Project = "other"
 		incoming.Operation = &v1alpha1.Operation{InitiatedBy: v1alpha1.OperationInitiator{Username: "new"}}
@@ -1906,9 +1919,10 @@ func Test_ApplicationManager_UpdateManagedApp_Details(t *testing.T) {
 		require.NotNil(t, sent.Operation)
 		assert.Equal(t, "new", sent.Operation.InitiatedBy.Username)
 		assert.Equal(t, map[string]string{
-			"new":                        "annotation",
-			"argocd.argoproj.io/refresh": "hard",       // removed by the controller, not by us
-			manager.SourceUIDAnnotation:  "source-uid", // never taken from the incoming application
+			common.AnnotationKeyAppSkipReconcile: "true",
+			"old":                                "annotation", // local annotation on the agent is preserved
+			"argocd.argoproj.io/refresh":         "hard",       // removed by the controller, not by us
+			manager.SourceUIDAnnotation:          "source-uid", // never taken from the incoming application
 		}, sent.Annotations)
 		assert.Equal(t, v1alpha1.SyncStatusCodeSynced, sent.Status.Sync.Status, "the status belongs to the agent")
 		assert.True(t, m.IsChangeIgnored("argocd/app", "8"))
@@ -1944,8 +1958,8 @@ func Test_ApplicationManager_UpdateManagedApp_Details(t *testing.T) {
 			},
 			{
 				name:    "annotations",
-				mutate:  func(a *v1alpha1.Application) { a.Annotations["new"] = "annotation" },
-				wantOps: []string{"add /metadata/annotations/new"},
+				mutate:  func(a *v1alpha1.Application) { a.Annotations[common.AnnotationKeyAppSkipReconcile] = "true" },
+				wantOps: []string{"add /metadata/annotations/argocd.argoproj.io~1skip-reconcile"},
 			},
 			{
 				name:   "the status is never patched",
@@ -2378,7 +2392,10 @@ func Test_ApplicationManager_UpdateAutonomousApp_Takeover(t *testing.T) {
 	newIncoming := func() *v1alpha1.Application {
 		app := newTestApp("app")
 		app.Labels = map[string]string{"new": "label"}
-		app.Annotations = map[string]string{"new": "annotation"}
+		app.Annotations = map[string]string{
+			common.AnnotationKeyAppSkipReconcile: "true",
+			"new":                                "annotation",
+		}
 		app.Finalizers = []string{"new-finalizer"}
 		app.Spec.Project = "other"
 		app.Operation = &v1alpha1.Operation{InitiatedBy: v1alpha1.OperationInitiator{Username: "new"}}
@@ -2410,8 +2427,9 @@ func Test_ApplicationManager_UpdateAutonomousApp_Takeover(t *testing.T) {
 		assert.Equal(t, "new", sent.Operation.InitiatedBy.Username)
 		assert.Equal(t, &deletedAt, sent.DeletionTimestamp)
 		assert.Equal(t, ptr.To(int64(30)), sent.DeletionGracePeriodSeconds)
-		assert.Equal(t, "annotation", sent.Annotations["new"])
-		assert.NotContains(t, sent.Annotations, "old")
+		assert.Equal(t, "true", sent.Annotations[common.AnnotationKeyAppSkipReconcile])
+		assert.NotContains(t, sent.Annotations, "new")
+		assert.Equal(t, "annotation", sent.Annotations["old"], "local annotation on the principal is preserved")
 		assert.Equal(t, "principal-source", sent.Annotations[manager.SourceUIDAnnotation], "kept from the principal")
 		assert.Equal(t, "notified", sent.Annotations[manager.NotifiedAnnotation], "kept from the principal")
 		assert.Contains(t, sent.Annotations, LastUpdatedAnnotation)
@@ -2438,10 +2456,12 @@ func Test_ApplicationManager_UpdateAutonomousApp_Takeover(t *testing.T) {
 	})
 
 	t.Run("with patch support only what the agent changed is patched", func(t *testing.T) {
+		const lastUpdatedOp = "add /metadata/annotations/argocd-agent.argoproj.io~1last-updated"
 		tests := []struct {
-			name    string
-			mutate  func(incoming *v1alpha1.Application)
-			wantOps []string
+			name         string
+			mutate       func(incoming *v1alpha1.Application)
+			wantOps      []string
+			wantMirrored string
 		}{
 			{
 				name: "an application that did not change",
@@ -2450,37 +2470,41 @@ func Test_ApplicationManager_UpdateAutonomousApp_Takeover(t *testing.T) {
 					delete(a.Annotations, manager.SourceUIDAnnotation)
 					delete(a.Annotations, manager.NotifiedAnnotation)
 				},
-				wantOps: nil,
+				wantOps: []string{lastUpdatedOp},
 			},
 			{
 				name: "labels and annotations",
 				mutate: func(a *v1alpha1.Application) {
 					a.Labels = map[string]string{"new": "label"}
-					a.Annotations = map[string]string{"new": "annotation"}
+					a.Annotations = map[string]string{
+						common.AnnotationKeyAppSkipReconcile: "true",
+						"new":                                "annotation",
+					}
 				},
-				wantOps: nil,
+				wantOps:      []string{lastUpdatedOp, "add /metadata/annotations/argocd.argoproj.io~1skip-reconcile"},
+				wantMirrored: "true",
 			},
 			{
 				name:    "finalizers",
 				mutate:  func(a *v1alpha1.Application) { a.Finalizers = []string{"new-finalizer"} },
-				wantOps: []string{"replace /metadata/finalizers/0"},
+				wantOps: []string{lastUpdatedOp, "replace /metadata/finalizers/0"},
 			},
 			{
 				name:    "spec",
 				mutate:  func(a *v1alpha1.Application) { a.Spec.Project = "other" },
-				wantOps: []string{"replace /spec/project"},
+				wantOps: []string{lastUpdatedOp, "replace /spec/project"},
 			},
 			{
 				name:    "status",
 				mutate:  func(a *v1alpha1.Application) { a.Status.Sync.Status = v1alpha1.SyncStatusCodeOutOfSync },
-				wantOps: []string{"replace /status/sync/status"},
+				wantOps: []string{lastUpdatedOp, "replace /status/sync/status"},
 			},
 			{
 				name: "operation",
 				mutate: func(a *v1alpha1.Application) {
 					a.Operation = &v1alpha1.Operation{InitiatedBy: v1alpha1.OperationInitiator{Username: "new"}}
 				},
-				wantOps: []string{"replace /operation/initiatedBy/username"},
+				wantOps: []string{lastUpdatedOp, "replace /operation/initiatedBy/username"},
 			},
 		}
 		for _, tt := range tests {
@@ -2502,9 +2526,14 @@ func Test_ApplicationManager_UpdateAutonomousApp_Takeover(t *testing.T) {
 				assert.ElementsMatch(t, tt.wantOps, withoutMapOps(patchOps(t, sent)))
 				patched := applyPatch(t, newExisting(), sent)
 				assert.Equal(t, incoming.Labels, patched.Labels)
-				assert.Equal(t, incoming.Annotations, patched.Annotations)
+				assert.Equal(t, "annotation", patched.Annotations["old"], "local annotation on the principal is preserved")
+				assert.NotContains(t, patched.Annotations, "new")
+				if tt.wantMirrored != "" {
+					assert.Equal(t, tt.wantMirrored, patched.Annotations[common.AnnotationKeyAppSkipReconcile])
+				}
 				assert.Equal(t, "principal-source", patched.Annotations[manager.SourceUIDAnnotation], "kept from the principal")
 				assert.Equal(t, "notified", patched.Annotations[manager.NotifiedAnnotation], "kept from the principal")
+				assert.Contains(t, patched.Annotations, LastUpdatedAnnotation)
 				assert.Equal(t, incoming.Finalizers, patched.Finalizers)
 				assert.Equal(t, incoming.Spec, patched.Spec)
 				assert.Equal(t, incoming.Status, patched.Status)
@@ -2574,7 +2603,6 @@ func Test_ApplicationManager_UpdateStatus_Details(t *testing.T) {
 		assert.Nil(t, sent.Operation)
 		assert.Equal(t, map[string]string{"new": "label"}, sent.Labels)
 		assert.Equal(t, "default", sent.Spec.Project, "the spec is not changed by a status update")
-		assert.Contains(t, sent.Annotations, LastUpdatedAnnotation)
 		assert.Equal(t, "principal-source", sent.Annotations[manager.SourceUIDAnnotation], "kept from the principal")
 		assert.True(t, m.IsChangeIgnored("argocd/app", "5"))
 	})
@@ -3115,4 +3143,741 @@ func Test_ApplicationManager_RevertAutonomousAppChanges_Details(t *testing.T) {
 
 		assert.False(t, m.RevertAutonomousAppChanges(context.Background(), newDriftedApp(), newSpecCache(&revertCachedSpec)))
 	})
+}
+
+// Test_AnnotationClassification covers the three annotation behaviours across
+// the update paths. Each case runs against both backends, because which
+// transformer executes depends on whether the backend supports patching, and
+// the two used to disagree about annotations.
+func Test_AnnotationClassification(t *testing.T) {
+	const (
+		mirrored = common.AnnotationKeyAppSkipReconcile
+		childApp = "argocd.argoproj.io/sync-wave"
+		unknown  = "example.com/owner"
+	)
+
+	baseSpec := v1alpha1.ApplicationSpec{
+		Source: &v1alpha1.ApplicationSource{
+			RepoURL:        "github.com",
+			TargetRevision: "HEAD",
+			Path:           ".",
+		},
+		Destination: v1alpha1.ApplicationDestination{
+			Server:    "in-cluster",
+			Namespace: "guestbook",
+		},
+	}
+
+	newApp := func(ns string, anns map[string]string) *v1alpha1.Application {
+		return &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{Name: "foobar", Namespace: ns, Annotations: anns},
+			Spec:       baseSpec,
+		}
+	}
+
+	// forEachBackend runs fn with usePatch both on and off.
+	forEachBackend := func(t *testing.T, fn func(t *testing.T, usePatch bool)) {
+		t.Helper()
+		for _, usePatch := range []bool{true, false} {
+			name := "patch"
+			if !usePatch {
+				name = "update"
+			}
+			t.Run(name, func(t *testing.T) { fn(t, usePatch) })
+		}
+	}
+
+	t.Run("UpdateManagedApp", func(t *testing.T) {
+		// The principal is the source of truth: it owns mirrored annotations
+		// on the agent, but must not touch anything else there.
+		run := func(t *testing.T, usePatch bool, existingAnns, incomingAnns map[string]string) *v1alpha1.Application {
+			t.Helper()
+			existing := newApp("argocd", existingAnns)
+			incoming := newApp("cluster-1", incomingAnns)
+
+			appC, ai := fakeInformer(t, "", existing)
+			be := application.NewKubernetesBackend(appC, "", ai, usePatch)
+			mgr, err := NewApplicationManager(be, "argocd",
+				WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent))
+			require.NoError(t, err)
+
+			updated, err := mgr.UpdateManagedApp(context.Background(), incoming, ManagedIdentity{})
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			return updated
+		}
+
+		forEachBackend(t, func(t *testing.T, usePatch bool) {
+			t.Run("mirrored annotation is established from the principal", func(t *testing.T) {
+				updated := run(t, usePatch, nil, map[string]string{mirrored: "true"})
+				assert.Equal(t, "true", updated.Annotations[mirrored])
+			})
+
+			t.Run("mirrored annotation is removed when the principal drops it", func(t *testing.T) {
+				updated := run(t, usePatch, map[string]string{mirrored: "true"}, nil)
+				assert.NotContains(t, updated.Annotations, mirrored)
+			})
+
+			t.Run("child-app annotation is not transferred", func(t *testing.T) {
+				updated := run(t, usePatch, nil, map[string]string{childApp: "5"})
+				assert.NotContains(t, updated.Annotations, childApp)
+			})
+
+			t.Run("unknown annotation is not transferred", func(t *testing.T) {
+				updated := run(t, usePatch, nil, map[string]string{unknown: "team-a"})
+				assert.NotContains(t, updated.Annotations, unknown)
+			})
+
+			t.Run("unknown annotation on the agent survives an unrelated update", func(t *testing.T) {
+				updated := run(t, usePatch,
+					map[string]string{"example.com/local": "yes"},
+					map[string]string{mirrored: "true"})
+				assert.Equal(t, "yes", updated.Annotations["example.com/local"],
+					"an annotation set on the agent must not be clobbered by a principal update")
+				assert.Equal(t, "true", updated.Annotations[mirrored])
+			})
+
+			t.Run("allow-listed annotation is transferred", func(t *testing.T) {
+				existing := newApp("argocd", nil)
+				incoming := newApp("cluster-1", map[string]string{"example.com/wanted": "yes"})
+
+				appC, ai := fakeInformer(t, "", existing)
+				be := application.NewKubernetesBackend(appC, "", ai, usePatch)
+				mgr, err := NewApplicationManager(be, "argocd",
+					WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent),
+					WithAnnotationFilter(manager.NewAnnotationFilter([]string{"example.com/*"})))
+				require.NoError(t, err)
+
+				updated, err := mgr.UpdateManagedApp(context.Background(), incoming, ManagedIdentity{})
+				require.NoError(t, err)
+				assert.Equal(t, "yes", updated.Annotations["example.com/wanted"])
+			})
+		})
+	})
+
+	t.Run("UpdateAutonomousApp", func(t *testing.T) {
+		// The agent is the source of truth here, so the directions reverse.
+		run := func(t *testing.T, usePatch bool, existingAnns, incomingAnns map[string]string) *v1alpha1.Application {
+			t.Helper()
+			existing := newApp("cluster-1", existingAnns)
+			incoming := newApp("cluster-1", incomingAnns)
+
+			appC, ai := fakeInformer(t, "", existing)
+			be := application.NewKubernetesBackend(appC, "", ai, usePatch)
+			mgr, err := NewApplicationManager(be, "argocd", WithRole(manager.ManagerRolePrincipal))
+			require.NoError(t, err)
+
+			updated, err := mgr.UpdateAutonomousApp(context.Background(), "cluster-1", incoming)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			return updated
+		}
+
+		forEachBackend(t, func(t *testing.T, usePatch bool) {
+			t.Run("mirrored annotation is established from the agent", func(t *testing.T) {
+				updated := run(t, usePatch, nil, map[string]string{mirrored: "true"})
+				assert.Equal(t, "true", updated.Annotations[mirrored])
+			})
+
+			t.Run("mirrored annotation is removed when the agent drops it", func(t *testing.T) {
+				updated := run(t, usePatch, map[string]string{mirrored: "true"}, nil)
+				assert.NotContains(t, updated.Annotations, mirrored)
+			})
+
+			t.Run("child-app annotation is not transferred", func(t *testing.T) {
+				updated := run(t, usePatch, nil, map[string]string{childApp: "5"})
+				assert.NotContains(t, updated.Annotations, childApp)
+			})
+
+			t.Run("unknown annotation on the principal survives", func(t *testing.T) {
+				updated := run(t, usePatch,
+					map[string]string{"example.com/local": "yes"},
+					map[string]string{mirrored: "true"})
+				assert.Equal(t, "yes", updated.Annotations["example.com/local"])
+			})
+
+			// The autonomous agent's application controller removes the
+			// refresh annotation once it has refreshed. Before this was
+			// handled explicitly it only disappeared from the principal as a
+			// side effect of the wholesale annotation copy, which no longer
+			// happens.
+			t.Run("refresh consumed on the agent is removed from the principal", func(t *testing.T) {
+				updated := run(t, usePatch,
+					map[string]string{v1alpha1.AnnotationKeyRefresh: "normal"},
+					nil)
+				assert.NotContains(t, updated.Annotations, v1alpha1.AnnotationKeyRefresh,
+					"a refresh the agent has consumed must not linger on the principal")
+			})
+
+			t.Run("refresh requested on the agent reaches the principal", func(t *testing.T) {
+				updated := run(t, usePatch, nil,
+					map[string]string{v1alpha1.AnnotationKeyRefresh: "normal"})
+				assert.Equal(t, "normal", updated.Annotations[v1alpha1.AnnotationKeyRefresh])
+			})
+		})
+	})
+
+	t.Run("UpdateStatus does not let the agent set annotations", func(t *testing.T) {
+		forEachBackend(t, func(t *testing.T, usePatch bool) {
+			existing := newApp("cluster-1", map[string]string{
+				"example.com/local": "yes",
+				mirrored:            "true",
+			})
+			incoming := newApp("cluster-1", map[string]string{
+				"example.com/local": "changed",
+				mirrored:            "false",
+				childApp:            "5",
+			})
+
+			appC, ai := fakeInformer(t, "", existing)
+			be := application.NewKubernetesBackend(appC, "", ai, usePatch)
+			mgr, err := NewApplicationManager(be, "argocd", WithRole(manager.ManagerRolePrincipal))
+			require.NoError(t, err)
+			mgr.mode = manager.ManagerModeManaged
+
+			updated, err := mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+
+			assert.Equal(t, "yes", updated.Annotations["example.com/local"])
+			assert.Equal(t, "true", updated.Annotations[mirrored],
+				"the principal owns a managed app's annotations; a status update must not change them")
+			assert.NotContains(t, updated.Annotations, childApp)
+		})
+	})
+
+	t.Run("UpdateOperation does not let the principal set annotations", func(t *testing.T) {
+		forEachBackend(t, func(t *testing.T, usePatch bool) {
+			existing := newApp("argocd", map[string]string{"example.com/local": "yes"})
+			incoming := newApp("argocd", map[string]string{
+				"example.com/local":           "changed",
+				childApp:                      "5",
+				v1alpha1.AnnotationKeyRefresh: "normal",
+			})
+
+			appC, ai := fakeInformer(t, "", existing)
+			be := application.NewKubernetesBackend(appC, "", ai, usePatch)
+			mgr, err := NewApplicationManager(be, "argocd",
+				WithRole(manager.ManagerRoleAgent), WithMode(manager.ManagerModeAutonomous))
+			require.NoError(t, err)
+
+			updated, err := mgr.UpdateOperation(context.Background(), incoming)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+
+			assert.Equal(t, "yes", updated.Annotations["example.com/local"],
+				"the autonomous agent owns its annotations; the principal must not change them")
+			assert.NotContains(t, updated.Annotations, childApp)
+			assert.Equal(t, "normal", updated.Annotations[v1alpha1.AnnotationKeyRefresh],
+				"a principal-requested refresh must still be delivered")
+		})
+	})
+}
+
+// Test_RevertAnnotationDrift covers reverting a mirrored annotation that was
+// changed directly on the peer. Before the source cache carried annotations,
+// only spec drift was noticed, so an annotation edited on the peer stayed put
+// until some unrelated update from the source of truth happened to overwrite
+// it.
+//
+// Each case seeds the cluster with the drifted state and the cache with the
+// state the source of truth last sent, which is the situation the revert
+// exists to resolve. Assertions are made against the object that ends up on
+// the cluster rather than the in-memory copy, so they reflect what the revert
+// actually wrote.
+func Test_RevertAnnotationDrift(t *testing.T) {
+	const mirrored = common.AnnotationKeyAppSkipReconcile
+
+	newApp := func(anns map[string]string, project string) *v1alpha1.Application {
+		full := map[string]string{manager.SourceUIDAnnotation: "some_uid"}
+		for k, v := range anns {
+			full[k] = v
+		}
+		return &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:        "foobar",
+				Namespace:   "argocd",
+				Annotations: full,
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: project,
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+	}
+
+	// setup seeds the cluster with onCluster and the source cache with the
+	// state derived from desired, then returns the manager, the object to
+	// hand to the revert, and the cache.
+	setup := func(t *testing.T, desired, onCluster *v1alpha1.Application) (*ApplicationManager, *cache.ResourceCache[cache.ApplicationState]) {
+		t.Helper()
+		appC, ai := fakeInformer(t, "", onCluster)
+		be := application.NewKubernetesBackend(appC, "", ai, true)
+		mgr, err := NewApplicationManager(be, "argocd",
+			WithMode(manager.ManagerModeManaged), WithRole(manager.ManagerRoleAgent))
+		require.NoError(t, err)
+
+		c := cache.NewSourceCache()
+		c.Application.Set("some_uid", mgr.CacheState(desired))
+		return mgr, c.Application
+	}
+
+	// onClusterAnnotations returns the annotations of the application as it
+	// now exists on the cluster. The read is marked ForUpdate so that it
+	// bypasses the informer lister, which in a test is never refreshed by a
+	// watch and would still report the pre-revert object.
+	onClusterAnnotations := func(t *testing.T, mgr *ApplicationManager) map[string]string {
+		t.Helper()
+		ctx := context.WithValue(context.Background(), backend.ForUpdateContextKey, true)
+		updated, err := mgr.Get(ctx, "foobar", "argocd")
+		require.NoError(t, err)
+		return updated.Annotations
+	}
+
+	t.Run("no drift is not reverted", func(t *testing.T) {
+		desired := newApp(map[string]string{mirrored: "true"}, "default")
+		onCluster := newApp(map[string]string{mirrored: "true"}, "default")
+		mgr, c := setup(t, desired, onCluster)
+
+		assert.False(t, mgr.RevertManagedAppChanges(context.Background(), onCluster, c))
+	})
+
+	t.Run("a changed mirrored annotation is reverted", func(t *testing.T) {
+		desired := newApp(map[string]string{mirrored: "true"}, "default")
+		onCluster := newApp(map[string]string{mirrored: "false"}, "default")
+		mgr, c := setup(t, desired, onCluster)
+
+		assert.True(t, mgr.RevertManagedAppChanges(context.Background(), onCluster, c))
+		assert.Equal(t, "true", onClusterAnnotations(t, mgr)[mirrored])
+	})
+
+	t.Run("a removed mirrored annotation is restored", func(t *testing.T) {
+		desired := newApp(map[string]string{mirrored: "true"}, "default")
+		onCluster := newApp(nil, "default")
+		mgr, c := setup(t, desired, onCluster)
+
+		assert.True(t, mgr.RevertManagedAppChanges(context.Background(), onCluster, c))
+		assert.Equal(t, "true", onClusterAnnotations(t, mgr)[mirrored])
+	})
+
+	t.Run("a mirrored annotation added on the peer is removed again", func(t *testing.T) {
+		desired := newApp(nil, "default")
+		onCluster := newApp(map[string]string{mirrored: "true"}, "default")
+		mgr, c := setup(t, desired, onCluster)
+
+		assert.True(t, mgr.RevertManagedAppChanges(context.Background(), onCluster, c))
+		assert.NotContains(t, onClusterAnnotations(t, mgr), mirrored)
+	})
+
+	t.Run("an unknown annotation added on the peer is not reverted", func(t *testing.T) {
+		desired := newApp(nil, "default")
+		onCluster := newApp(map[string]string{"example.com/local": "yes"}, "default")
+		mgr, c := setup(t, desired, onCluster)
+
+		assert.False(t, mgr.RevertManagedAppChanges(context.Background(), onCluster, c),
+			"an annotation argocd-agent does not own must never count as drift")
+		assert.Equal(t, "yes", onClusterAnnotations(t, mgr)["example.com/local"])
+	})
+
+	t.Run("reverting spec drift leaves an unknown annotation alone", func(t *testing.T) {
+		desired := newApp(nil, "default")
+		onCluster := newApp(map[string]string{"example.com/local": "yes"}, "changed")
+		mgr, c := setup(t, desired, onCluster)
+
+		assert.True(t, mgr.RevertManagedAppChanges(context.Background(), onCluster, c))
+		assert.Equal(t, "yes", onClusterAnnotations(t, mgr)["example.com/local"],
+			"a spec revert must not take the peer's own annotations with it")
+	})
+}
+
+// Test_TriggerAnnotations covers the refresh annotations across the two paths
+// where a trigger has to cross between peers. Before these were generalised,
+// only the bare refresh key was handled, so the timestamp Argo CD writes
+// alongside it never reached the peer and a consumed one was never cleared.
+//
+// The agent's copy deliberately carries no annotations at all. That is the
+// normal case for an autonomous application, and it is the case that used to
+// make the API server reject the patch outright: JSON Patch cannot add a key
+// to a map that does not exist, so the request never arrived. Both backends
+// are exercised because only one of them builds a patch.
+func Test_TriggerAnnotations(t *testing.T) {
+	baseSpec := v1alpha1.ApplicationSpec{
+		Source:      &v1alpha1.ApplicationSource{RepoURL: "github.com", Path: "."},
+		Destination: v1alpha1.ApplicationDestination{Name: "in-cluster", Namespace: "guestbook"},
+	}
+	newApp := func(ns string, anns map[string]string) *v1alpha1.Application {
+		return &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{Name: "foobar", Namespace: ns, Annotations: anns},
+			Spec:       baseSpec,
+		}
+	}
+	readBack := func(t *testing.T, mgr *ApplicationManager, ns string) map[string]string {
+		t.Helper()
+		ctx := context.WithValue(context.Background(), backend.ForUpdateContextKey, true)
+		app, err := mgr.Get(ctx, "foobar", ns)
+		require.NoError(t, err)
+		return app.Annotations
+	}
+
+	for _, key := range manager.TriggerAnnotations {
+		for _, usePatch := range []bool{true, false} {
+			name := "patch"
+			if !usePatch {
+				name = "update"
+			}
+
+			t.Run(key+"/delivered to autonomous agent/"+name, func(t *testing.T) {
+				existing := newApp("argocd", nil)
+				incoming := newApp("argocd", map[string]string{
+					key:                          "requested",
+					"example.com/principal-only": "nope",
+				})
+
+				appC, ai := fakeInformer(t, "", existing)
+				be := application.NewKubernetesBackend(appC, "", ai, usePatch)
+				mgr, err := NewApplicationManager(be, "argocd",
+					WithRole(manager.ManagerRoleAgent), WithMode(manager.ManagerModeAutonomous))
+				require.NoError(t, err)
+
+				_, err = mgr.UpdateOperation(context.Background(), incoming)
+				require.NoError(t, err, "the patch must be valid against an object with no annotations")
+
+				got := readBack(t, mgr, "argocd")
+				assert.Equal(t, "requested", got[key])
+				assert.NotContains(t, got, "example.com/principal-only",
+					"the autonomous agent owns its annotations; only a trigger may cross")
+			})
+
+			t.Run(key+"/consumption clears it on the principal/"+name, func(t *testing.T) {
+				// The agent consumed the trigger, so its update no longer
+				// carries it and the principal's copy has to lose it too.
+				existing := newApp("cluster-1", map[string]string{key: "requested"})
+				incoming := newApp("cluster-1", nil)
+
+				appC, ai := fakeInformer(t, "", existing)
+				be := application.NewKubernetesBackend(appC, "", ai, usePatch)
+				mgr, err := NewApplicationManager(be, "argocd", WithRole(manager.ManagerRolePrincipal))
+				require.NoError(t, err)
+				mgr.mode = manager.ManagerModeManaged
+
+				_, err = mgr.UpdateStatus(context.Background(), "cluster-1", incoming)
+				require.NoError(t, err)
+				assert.NotContains(t, readBack(t, mgr, "cluster-1"), key,
+					"a trigger the agent consumed must not linger on the principal")
+			})
+		}
+	}
+}
+
+// Test_RevertAutonomousAnnotationDrift is the autonomous counterpart to
+// Test_RevertAnnotationDrift. For an autonomous agent the agent is the source
+// of truth, so a mirrored annotation added, changed or removed on the
+// principal must be put back to whatever the agent last published.
+//
+// The revert logic is shared with the managed path, but this entry point has
+// its own source-UID guard and writes through UpdateAutonomousApp, so it is
+// covered separately.
+func Test_RevertAutonomousAnnotationDrift(t *testing.T) {
+	const mirrored = common.AnnotationKeyAppSkipReconcile
+
+	newApp := func(anns map[string]string) *v1alpha1.Application {
+		full := map[string]string{manager.SourceUIDAnnotation: "some_uid"}
+		for k, v := range anns {
+			full[k] = v
+		}
+		return &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{Name: "foobar", Namespace: "cluster-1", Annotations: full},
+			Spec: v1alpha1.ApplicationSpec{
+				Source:      &v1alpha1.ApplicationSource{RepoURL: "github.com", Path: "."},
+				Destination: v1alpha1.ApplicationDestination{Name: "in-cluster", Namespace: "guestbook"},
+			},
+		}
+	}
+
+	// published is what the agent last sent; onPrincipal is the drifted copy.
+	setup := func(t *testing.T, published, onPrincipal *v1alpha1.Application) (*ApplicationManager, *cache.ResourceCache[cache.ApplicationState]) {
+		t.Helper()
+		appC, ai := fakeInformer(t, "", onPrincipal)
+		be := application.NewKubernetesBackend(appC, "", ai, true)
+		mgr, err := NewApplicationManager(be, "argocd", WithRole(manager.ManagerRolePrincipal))
+		require.NoError(t, err)
+
+		c := cache.NewSourceCache()
+		c.Application.Set("some_uid", mgr.CacheState(published))
+		return mgr, c.Application
+	}
+
+	onCluster := func(t *testing.T, mgr *ApplicationManager) map[string]string {
+		t.Helper()
+		ctx := context.WithValue(context.Background(), backend.ForUpdateContextKey, true)
+		app, err := mgr.Get(ctx, "foobar", "cluster-1")
+		require.NoError(t, err)
+		return app.Annotations
+	}
+
+	t.Run("no drift is not reverted", func(t *testing.T) {
+		app := newApp(map[string]string{mirrored: "true"})
+		mgr, c := setup(t, newApp(map[string]string{mirrored: "true"}), app)
+		assert.False(t, mgr.RevertAutonomousAppChanges(context.Background(), app, c))
+	})
+
+	t.Run("changed on the principal is reverted to the agent's value", func(t *testing.T) {
+		app := newApp(map[string]string{mirrored: "false"})
+		mgr, c := setup(t, newApp(map[string]string{mirrored: "true"}), app)
+		assert.True(t, mgr.RevertAutonomousAppChanges(context.Background(), app, c))
+		assert.Equal(t, "true", onCluster(t, mgr)[mirrored])
+	})
+
+	t.Run("deleted on the principal is restored", func(t *testing.T) {
+		app := newApp(nil)
+		mgr, c := setup(t, newApp(map[string]string{mirrored: "true"}), app)
+		assert.True(t, mgr.RevertAutonomousAppChanges(context.Background(), app, c))
+		assert.Equal(t, "true", onCluster(t, mgr)[mirrored])
+	})
+
+	t.Run("added on the principal is removed again", func(t *testing.T) {
+		app := newApp(map[string]string{mirrored: "true"})
+		mgr, c := setup(t, newApp(nil), app)
+		assert.True(t, mgr.RevertAutonomousAppChanges(context.Background(), app, c))
+		assert.NotContains(t, onCluster(t, mgr), mirrored)
+	})
+
+	t.Run("an unknown annotation on the principal is left alone", func(t *testing.T) {
+		app := newApp(map[string]string{"example.com/local": "yes"})
+		mgr, c := setup(t, newApp(nil), app)
+		assert.False(t, mgr.RevertAutonomousAppChanges(context.Background(), app, c),
+			"an annotation the agent does not own must never count as drift")
+		assert.Equal(t, "yes", onCluster(t, mgr)["example.com/local"])
+	})
+
+	t.Run("without a source UID nothing is reverted", func(t *testing.T) {
+		app := newApp(map[string]string{mirrored: "false"})
+		delete(app.Annotations, manager.SourceUIDAnnotation)
+		mgr, c := setup(t, newApp(map[string]string{mirrored: "true"}), app)
+		assert.False(t, mgr.RevertAutonomousAppChanges(context.Background(), app, c))
+	})
+}
+
+func Test_RevertAnnotationDrift_AnnotationRemovedFromAllowList(t *testing.T) {
+	const annotationKey = "example.com/custom"
+
+	newApp := func(annotationValue string) *v1alpha1.Application {
+		return &v1alpha1.Application{
+			ObjectMeta: v1.ObjectMeta{
+				Name:      "foobar",
+				Namespace: "argocd",
+				Annotations: map[string]string{
+					manager.SourceUIDAnnotation: "some_uid",
+					annotationKey:               annotationValue,
+				},
+			},
+			Spec: v1alpha1.ApplicationSpec{
+				Project: "default",
+				Source: &v1alpha1.ApplicationSource{
+					RepoURL:        "github.com",
+					TargetRevision: "HEAD",
+					Path:           ".",
+				},
+				Destination: v1alpha1.ApplicationDestination{
+					Server:    "in-cluster",
+					Namespace: "guestbook",
+				},
+			},
+		}
+	}
+
+	desired := newApp("cached-value")
+	onCluster := newApp("peer-local-value")
+
+	appC, ai := fakeInformer(t, "", onCluster)
+	be := application.NewKubernetesBackend(appC, "", ai, true)
+
+	// Cache the application while the annotation is allow-listed.
+	cachedManager, err := NewApplicationManager(
+		be,
+		"argocd",
+		WithMode(manager.ManagerModeManaged),
+		WithRole(manager.ManagerRoleAgent),
+		WithAnnotationFilter(manager.NewAnnotationFilter([]string{"example.com/*"})),
+	)
+	require.NoError(t, err)
+
+	sourceCache := cache.NewSourceCache()
+	sourceCache.Application.Set("some_uid", cachedManager.CacheState(desired))
+
+	// Create a manager with the updated allow-list, which no longer
+	// includes the custom annotation.
+	currentManager, err := NewApplicationManager(
+		be,
+		"argocd",
+		WithMode(manager.ManagerModeManaged),
+		WithRole(manager.ManagerRoleAgent),
+		WithAnnotationFilter(manager.NewAnnotationFilter([]string{})),
+	)
+	require.NoError(t, err)
+
+	reverted := currentManager.RevertManagedAppChanges(
+		context.Background(),
+		onCluster,
+		sourceCache.Application,
+	)
+
+	assert.False(t, reverted,
+		"an annotation removed from the current allow-list must not trigger a revert")
+
+	// Verify the peer's local annotation was not overwritten.
+	ctx := context.WithValue(context.Background(), backend.ForUpdateContextKey, true)
+	updated, err := currentManager.Get(ctx, "foobar", "argocd")
+	require.NoError(t, err)
+
+	assert.Equal(t, "peer-local-value", updated.Annotations[annotationKey])
+}
+
+func Test_AnnotationSync_ConflictRetryPreservesConcurrentLocalAnnotations(t *testing.T) {
+	const (
+		localPreserved = "argocd-agent.argoproj.io/local"
+		mirrored       = common.AnnotationKeyAppSkipReconcile
+	)
+	conflict := errors.NewConflict(schema.GroupResource{Group: "argoproj.io", Resource: "applications"}, "app", fmt.Errorf("the object was modified"))
+
+	for _, usePatch := range []bool{true, false} {
+		mode := "update"
+		if usePatch {
+			mode = "patch"
+		}
+
+		t.Run("UpdateManagedApp/"+mode, func(t *testing.T) {
+			be, m := newMockedAppManager(t, managedAgentOpts()...)
+
+			first := newTestApp("app")
+			first.ResourceVersion = "rv-1"
+			first.Annotations = map[string]string{
+				localPreserved:                "A",
+				v1alpha1.AnnotationKeyRefresh: "normal",
+			}
+
+			second := newTestApp("app")
+			second.ResourceVersion = "rv-2"
+			second.Annotations = map[string]string{
+				localPreserved: "B",
+			}
+
+			incoming := newTestApp("app")
+			incoming.Annotations = map[string]string{
+				mirrored: "true",
+			}
+
+			be.EXPECT().Get(mock.Anything, "app", testNamespace).Return(first, nil).Once()
+			be.EXPECT().Get(mock.Anything, "app", testNamespace).Return(second, nil).Once()
+			be.EXPECT().SupportsPatch().Return(usePatch).Twice()
+
+			var result *v1alpha1.Application
+			attempts := 0
+			if usePatch {
+				be.EXPECT().Patch(mock.Anything, "app", testNamespace, mock.Anything).RunAndReturn(
+					func(_ context.Context, _, _ string, patch []byte) (*v1alpha1.Application, error) {
+						attempts++
+						if attempts == 1 {
+							return nil, conflict
+						}
+						result = applyPatch(t, second.DeepCopy(), patch)
+						return result, nil
+					}).Twice()
+			} else {
+				be.EXPECT().Update(mock.Anything, mock.Anything).RunAndReturn(
+					func(_ context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
+						attempts++
+						if attempts == 1 {
+							return nil, conflict
+						}
+						result = app.DeepCopy()
+						return result, nil
+					}).Twice()
+			}
+
+			got, err := m.UpdateManagedApp(context.Background(), incoming, ManagedIdentity{})
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			require.NotNil(t, result)
+
+			assert.Equal(t, "B", result.Annotations[localPreserved],
+				"conflict retry must not overwrite a concurrently updated local preserved annotation with the stale value from attempt 1")
+			assert.NotContains(t, result.Annotations, v1alpha1.AnnotationKeyRefresh,
+				"conflict retry must not resurrect a trigger annotation consumed between attempts")
+			assert.Equal(t, "true", result.Annotations[mirrored])
+			assert.Equal(t, map[string]string{mirrored: "true"}, incoming.Annotations,
+				"caller's incoming annotations must not be mutated")
+		})
+
+		t.Run("UpdateAutonomousApp/"+mode, func(t *testing.T) {
+			be, m := newMockedAppManager(t, principalOpts()...)
+
+			first := newTestApp("app")
+			first.ResourceVersion = "rv-1"
+			first.Annotations = map[string]string{
+				manager.SourceUIDAnnotation: "uid-1",
+				localPreserved:              "A",
+			}
+
+			second := newTestApp("app")
+			second.ResourceVersion = "rv-2"
+			second.Annotations = map[string]string{
+				manager.SourceUIDAnnotation: "uid-1",
+				localPreserved:              "B",
+			}
+
+			incoming := newTestApp("app")
+			incoming.Annotations = map[string]string{
+				mirrored: "true",
+			}
+
+			be.EXPECT().Get(mock.Anything, "app", testNamespace).Return(first, nil).Once()
+			be.EXPECT().Get(mock.Anything, "app", testNamespace).Return(second, nil).Once()
+			be.EXPECT().SupportsPatch().Return(usePatch).Twice()
+
+			var result *v1alpha1.Application
+			attempts := 0
+			if usePatch {
+				be.EXPECT().Patch(mock.Anything, "app", testNamespace, mock.Anything).RunAndReturn(
+					func(_ context.Context, _, _ string, patch []byte) (*v1alpha1.Application, error) {
+						attempts++
+						if attempts == 1 {
+							return nil, conflict
+						}
+						result = applyPatch(t, second.DeepCopy(), patch)
+						return result, nil
+					}).Twice()
+			} else {
+				be.EXPECT().Update(mock.Anything, mock.Anything).RunAndReturn(
+					func(_ context.Context, app *v1alpha1.Application) (*v1alpha1.Application, error) {
+						attempts++
+						if attempts == 1 {
+							return nil, conflict
+						}
+						result = app.DeepCopy()
+						return result, nil
+					}).Twice()
+			}
+
+			got, err := m.UpdateAutonomousApp(context.Background(), testNamespace, incoming)
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			require.NotNil(t, result)
+
+			assert.Equal(t, "B", result.Annotations[localPreserved],
+				"conflict retry must not overwrite a concurrently updated local preserved annotation with the stale value from attempt 1")
+			assert.Equal(t, "uid-1", result.Annotations[manager.SourceUIDAnnotation])
+			assert.Equal(t, "true", result.Annotations[mirrored])
+			assert.NotContains(t, incoming.Annotations, localPreserved,
+				"caller's incoming annotations must not absorb local annotations across retries")
+		})
+	}
 }

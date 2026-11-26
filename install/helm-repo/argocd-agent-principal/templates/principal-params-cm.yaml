@@ -24,6 +24,13 @@ data:
   # Applied at runtime: editing this key takes effect without a restart.
   principal.log.full-detail: {{ . | quote }}
 {{- end }}
+{{- with .Values.principal.application.annotationsAllowList }}
+  # principal.application.annotations.allow-list: Comma-separated glob patterns
+  # for Application annotations to transfer to agents, in addition to the ones
+  # argocd-agent handles itself. The agents must use the same list.
+  # Applied at runtime: editing this key takes effect without a restart.
+  principal.application.annotations.allow-list: {{ . | quote }}
+{{- end }}
   # principal.log.format: The log format principal should use. Valid values are
   # "json" or "text".
   # Default: "text"

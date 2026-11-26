@@ -24,29 +24,35 @@ import (
 func Test_SourceResourceCache(t *testing.T) {
 
 	sourceCache := NewSourceCache()
-	t.Run("Test ApplicationSpec Cache", func(t *testing.T) {
+	t.Run("Test ApplicationState Cache", func(t *testing.T) {
 
-		appSpecCache := sourceCache.Application
-		assert.Empty(t, appSpecCache.items)
+		appStateCache := sourceCache.Application
+		assert.Empty(t, appStateCache.items)
 
-		expectedAppSpec := v1alpha1.ApplicationSpec{Project: "test-project"}
-		appSpecCache.Set("test", expectedAppSpec)
-		assert.Equal(t, 1, len(appSpecCache.items))
+		expectedState := ApplicationState{
+			Spec:        v1alpha1.ApplicationSpec{Project: "test-project"},
+			Annotations: map[string]string{"argocd.argoproj.io/skip-reconcile": "true"},
+		}
+		appStateCache.Set("test", expectedState)
+		assert.Equal(t, 1, len(appStateCache.items))
 
-		actualAppSpec, ok := appSpecCache.Get("test")
+		actualState, ok := appStateCache.Get("test")
 		assert.True(t, ok)
-		assert.Equal(t, expectedAppSpec, actualAppSpec)
+		assert.Equal(t, expectedState, actualState)
 
-		expectedAppSpec.Project = "test-project-updated"
-		appSpecCache.Set("test", expectedAppSpec)
-		assert.Equal(t, 1, len(appSpecCache.items))
+		// Both halves of the state are updated independently: an annotation
+		// can drift without the spec changing, and vice versa.
+		expectedState.Spec.Project = "test-project-updated"
+		expectedState.Annotations = map[string]string{"argocd.argoproj.io/skip-reconcile": "false"}
+		appStateCache.Set("test", expectedState)
+		assert.Equal(t, 1, len(appStateCache.items))
 
-		actualAppSpec, ok = appSpecCache.Get("test")
+		actualState, ok = appStateCache.Get("test")
 		assert.True(t, ok)
-		assert.Equal(t, expectedAppSpec, actualAppSpec)
+		assert.Equal(t, expectedState, actualState)
 
-		appSpecCache.Delete("test")
-		assert.Empty(t, appSpecCache.items)
+		appStateCache.Delete("test")
+		assert.Empty(t, appStateCache.items)
 	})
 
 	t.Run("Test AppProjectSpec Cache", func(t *testing.T) {

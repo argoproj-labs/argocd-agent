@@ -1,6 +1,6 @@
 # argocd-agent-agent
 
-![Version: 0.2.8](https://img.shields.io/badge/Version-0.2.8-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
+![Version: 0.2.9](https://img.shields.io/badge/Version-0.2.9-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.8.1](https://img.shields.io/badge/AppVersion-v0.8.1-informational?style=flat-square)
 
 Argo CD Agent for connecting managed clusters to a Principal
 
@@ -27,6 +27,7 @@ Kubernetes: `>=1.24.0-0`
 | affinity | object | `{}` | Affinity rules for the agent Pod. |
 | agentMode | string | `"autonomous"` | Agent mode of operation. |
 | allowedNamespaces | string | `""` | Comma-separated list of additional namespaces the agent is allowed to manage applications in (used with applications in any namespace feature). Supports glob patterns (e.g., "team-*,prod-*"). |
+| applicationAnnotationsAllowList | string | `""` | Comma-separated glob patterns for Application annotations to transfer between this agent and the principal, in addition to the ones argocd-agent handles itself (notice.argocd.argoproj.io/*, manifest-generate-paths, skip-reconcile and refresh). Unmatched annotations are left untouched on both sides and are not sent in events. Patterns capturing annotations argocd-agent depends on, or ones only meaningful on a child Application, are rejected and logged. The principal must be configured with the same list. Applied at runtime: editing agent.application.annotations.allow-list in the params ConfigMap takes effect without a restart. E.g. "argocd-image-updater.argoproj.io/*" |
 | argoCdRedisPasswordKey | string | `"auth"` | ArgoCD Redis password key. |
 | argoCdRedisSecretName | string | `"argocd-redis"` | ArgoCD Redis password secret name. |
 | auth | string | `"mtls:any"` | Authentication mode for connecting to the principal. |

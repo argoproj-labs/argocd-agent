@@ -188,6 +188,12 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 	if err != nil {
 		return err
 	}
+
+	// Drop annotations that must not be established locally. An agent running
+	// an older version does not filter them on the way out, so an event can
+	// still carry them.
+	s.appManager.FilterIncomingAnnotations(incoming)
+
 	agentMode := s.agentMode(agentName)
 
 	logCtx := s.logGrpcEvent().WithFields(logrus.Fields{
@@ -257,7 +263,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return event.ErrEventDiscarded
 		}
 
-		s.sourceCache.Application.Set(incoming.UID, incoming.Spec)
+		s.sourceCache.Application.Set(incoming.UID, s.appManager.CacheState(incoming))
 
 		incoming.SetNamespace(agentName)
 		_, err := s.appManager.Create(ctx, incoming, true)
@@ -301,7 +307,7 @@ func (s *Server) processApplicationEvent(ctx context.Context, agentName string, 
 			return nil
 		}
 
-		s.sourceCache.Application.Set(incoming.UID, incoming.Spec)
+		s.sourceCache.Application.Set(incoming.UID, s.appManager.CacheState(incoming))
 
 		_, err = s.appManager.UpdateAutonomousApp(ctx, agentName, incoming)
 		if err != nil {
