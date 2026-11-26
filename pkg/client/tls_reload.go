@@ -56,10 +56,11 @@ func WithTLSReloadFromSecret(kube kubernetes.Interface, namespace, certSecretNam
 // when that file changes.
 func WithRootCAReloadFromFile(caPath string) RemoteOption {
 	return func(r *Remote) error {
-		if err := WithRootAuthoritiesFromFile(caPath)(r); err != nil {
+		provider, err := tlsutil.NewPublicCAFileProvider(caPath)
+		if err != nil {
 			return err
 		}
-		r.enableRootCAReload(tlsutil.NewTLSFileProvider("", "", caPath, &tlsutil.TLSMaterial{CAPool: r.tlsConfig.RootCAs}))
+		r.enableRootCAReload(provider)
 		return nil
 	}
 }
@@ -68,10 +69,11 @@ func WithRootCAReloadFromFile(caPath string) RemoteOption {
 // and reloads it when that Secret changes.
 func WithRootCAReloadFromSecret(kube kubernetes.Interface, namespace, caSecretName string) RemoteOption {
 	return func(r *Remote) error {
-		if err := WithRootAuthoritiesFromSecret(kube, namespace, caSecretName)(r); err != nil {
+		provider, err := tlsutil.NewPublicCASecretProvider(context.Background(), kube, namespace, caSecretName)
+		if err != nil {
 			return err
 		}
-		r.enableRootCAReload(tlsutil.NewTLSSecretProvider("", caSecretName, namespace, kube, &tlsutil.TLSMaterial{CAPool: r.tlsConfig.RootCAs}))
+		r.enableRootCAReload(provider)
 		return nil
 	}
 }

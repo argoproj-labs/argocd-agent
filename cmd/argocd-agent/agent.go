@@ -476,10 +476,10 @@ func NewAgentRunCommand() *cobra.Command {
 		"Credentials to use when connecting to server")
 	command.Flags().StringVar(&rootCASecretName, "root-ca-secret-name",
 		env.StringWithDefault("ARGOCD_AGENT_TLS_ROOT_CA_SECRET_NAME", nil, config.SecretNamePrincipalCA),
-		"Name of the secret containing the root CA certificate")
+		"Name of the Secret containing only public CA certificates for verifying the principal")
 	command.Flags().StringVar(&rootCAPath, "root-ca-path",
 		env.StringWithDefault("ARGOCD_AGENT_TLS_ROOT_CA_PATH", nil, ""),
-		"Path to a file containing root CA certificate for verifying remote TLS")
+		"Path to a PEM file containing only public CA certificates for verifying the principal")
 	command.Flags().StringVar(&tlsSecretName, "tls-secret-name",
 		env.StringWithDefault("ARGOCD_AGENT_TLS_SECRET_NAME", nil, config.SecretNameAgentClientCert),
 		"Name of the secret containing the TLS certificate")

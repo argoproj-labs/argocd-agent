@@ -8,12 +8,12 @@ argocd-agent uses a PKI to secure all communications. The following certificates
 
 | Certificate/Key | Location | Purpose | Secret Name |
 |----------------|----------|---------|-------------|
-| **CA Certificate** | Principal | Root certificate authority for signing all other certificates | `argocd-agent-ca` |
+| **CA Certificate and Signing Key** | Principal | Issues TLS certificates and provides the trust anchor for verifying agent client certificates | `argocd-agent-ca` |
 | **Principal Server Certificate** | Principal | Secures gRPC communication from agents | `argocd-agent-principal-tls` |
 | **Resource Proxy Certificate** | Principal | Secures HTTP communication between Argo CD and principal | `argocd-agent-resource-proxy-tls` |
 | **JWT Signing Key** | Principal | Signs authentication tokens | `argocd-agent-jwt` |
-| **CA Certificate** | Agent | Validates the principal's server certificate | `argocd-agent-ca` |
-| **Client Certificate** | Agent | Authenticates the agent to the principal (mTLS) | `argocd-agent-client-tls` |
+| **Public CA Certificate Bundle** | Agent | Validates the principal's server certificate | `argocd-agent-ca` |
+| **Client Certificate and Private Key** | Agent | Authenticates the agent to the principal (mTLS) | `argocd-agent-client-tls` |
 
 ## Architecture Overview
 
@@ -27,12 +27,12 @@ graph TB
     end
 
     subgraph Agent_Cluster_1[Agent Cluster 1]
-        Agent1CA[CA Certificate<br/>argocd-agent-ca]
+        Agent1CA[Public CA Certificate<br/>argocd-agent-ca]
         Agent1Cert[Client Certificate<br/>argocd-agent-client-tls]
     end
 
     subgraph Agent_Cluster_2[Agent Cluster 2]
-        Agent2CA[CA Certificate<br/>argocd-agent-ca]
+        Agent2CA[Public CA Certificate<br/>argocd-agent-ca]
         Agent2Cert[Client Certificate<br/>argocd-agent-client-tls]
     end
 
@@ -155,6 +155,8 @@ argocd-agentctl pki propagate \
   --agent-namespace argocd
 ```
 
+Both commands copy the public CA certificate to the agent cluster. The agent uses it to verify the principal's server certificate. The agent's own client certificate and private key are stored separately in `argocd-agent-client-tls`.
+
 ### Verification
 
 Verify all required secrets have been created:
@@ -190,6 +192,13 @@ argocd-agent-client-tls                   kubernetes.io/tls     2      4m
 ## Agent client certificate reload
 
 The agent watches the client certificate Secret (default `argocd-agent-client-tls`), or the client certificate files when those are set. It also watches the root CA, from the CA Secret (default `argocd-agent-ca`) or from the `--root-ca-path` file. The client certificate and the root CA can come from different sources. The next TLS handshake uses the new certificate. The agent process does not restart.
+
+!!! note "root CA bundles"
+    When loading a root CA, managed and autonomous agents require a public certificate bundle. If that Secret or file contains a private key, the agent exits with an error at startup or on reload. Replace the affected Secret or file with the public CA certificates. If the CA signing key was copied to a workload cluster, treat it as exposed and rotate the CA and its issued certificates.
+
+    Outside PEM blocks, the bundle allows only whitespace and comment lines that begin with `#` after optional indentation.
+
+    An agent CA file must contain only CA certificates, including at least one that is currently valid. A CA Secret must contain a currently valid CA in `ca.crt` or `tls.crt`. Both sources can include expired CAs alongside current ones. The agent checks certificate dates when it verifies the principal's TLS chain.
 
 An open connection keeps the TLS session that started it. The new certificate is used when the agent connects again.
 
@@ -312,21 +321,23 @@ spec:
   - <cluster-name>.agents.local
 ```
 
-Export and transfer the agent certificate to the agent cluster:
+Transfer the client credentials to the agent cluster and create the root CA Secret from the public certificate field of the principal's CA Secret.
 
 ```bash
-# Export agent certificate
-kubectl get secret <cluster-name>-agent -o yaml -n argocd | kubectl neat > <cluster-name>-agent.yaml
+# Export the agent client certificate and private key
+kubectl --context <principal-context> get secret <cluster-name>-agent -o yaml -n argocd | \
+  kubectl neat > <cluster-name>-agent.yaml
 
-# Export CA certificate (without private key)
-kubectl get secret argocd-agent-ca -o yaml -n argocd | yq 'del(.data.["tls.key"])' > argocd-agent-ca-public.yaml
-yq -i '.type = "Opaque"' argocd-agent-ca-public.yaml
+# Export only the public CA certificate
+kubectl --context <principal-context> get secret argocd-agent-ca -n argocd \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d > ca.crt
 
 # Rename secret for agent cluster
 yq -i '.metadata.name = "argocd-agent-client-tls"' <cluster-name>-agent.yaml
 
-# Apply on agent cluster
-kubectl apply -f argocd-agent-ca-public.yaml --context <agent-context>
+# Create the certificate-only CA Secret and install the client credentials
+kubectl --context <agent-context> create secret generic argocd-agent-ca \
+  --namespace argocd --type=Opaque --from-file=ca.crt=ca.crt
 kubectl apply -f <cluster-name>-agent.yaml --context <agent-context>
 ```
 
@@ -790,6 +801,10 @@ invalid, the principal will exit and enter a crash loop until valid certificates
 
 ## Troubleshooting
 
+### Private Key in Agent Root CA
+
+An agent that reports `contains a private key` in its root CA configuration exits at startup or on reload. The error identifies the PEM file or the Secret and field. Create a certificate-only Secret or file from the public CA bundle supplied by your issuer, then point the agent at that source. See [Agent client certificate reload](#agent-client-certificate-reload) for guidance if the signing key reached the workload cluster.
+
 ### Certificate Validation Errors
 
 **Symptom**: "certificate signed by unknown authority" errors
@@ -851,7 +866,7 @@ kubectl get secret argocd-agent-client-tls -n argocd -o jsonpath='{.data.tls\.cr
 3. **Protect Private Keys**: Never commit private keys to version control
 4. **Use Separate Certificates**: Use separate certificates for each component and agent
 5. **Monitor Expiration**: Set up alerts for certificate expiration
-6. **Restrict CA Access**: Only the principal cluster should have the CA private key
+6. **Restrict CA Access**: Keep the CA signing key with the issuer and distribute only public CA certificates to workload clusters
 7. **Use Strong TLS Settings**: Enable TLS 1.3 and disable weak cipher suites
 8. **Consider SPIRE for multi-cluster**: For deployments with many clusters, SPIRE eliminates per-agent certificate management
 

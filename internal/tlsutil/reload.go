@@ -12,6 +12,7 @@
 package tlsutil
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -19,9 +20,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/sirupsen/logrus"
@@ -53,6 +57,8 @@ type TLSFileProvider struct {
 	ClientKeyPath string
 	// Material is the current TLS config to be used
 	Material atomic.Pointer[TLSMaterial]
+	// publicCAOnly validates the agent's CA file as a public PEM bundle.
+	publicCAOnly bool
 	// writeMu is used for concurrent on writing only
 	writeMu sync.Mutex
 	// onUpdate is called after valid TLS material is stored.
@@ -71,6 +77,8 @@ type TLSSecretProvider struct {
 	Material atomic.Pointer[TLSMaterial]
 	// kubeClient is the client to use for making the Kubernetes API requests
 	kubeClient kubernetes.Interface
+	// publicCAOnly validates the agent's CA Secret as a public PEM bundle.
+	publicCAOnly bool
 	// writeMu is used for concurrent on writing only
 	writeMu sync.Mutex
 	// onUpdate is called after valid TLS material is stored.
@@ -97,6 +105,18 @@ func NewTLSFileProvider(clientCertPath, clientKeyPath, caCertPath string, materi
 	provider.Material.Store(material)
 
 	return provider
+}
+
+// NewPublicCAFileProvider loads the agent's root CA file for hot reload.
+func NewPublicCAFileProvider(caPath string) (*TLSFileProvider, error) {
+	provider := NewTLSFileProvider("", "", caPath, nil)
+	provider.publicCAOnly = true
+	pool, err := provider.readCAPool()
+	if err != nil {
+		return nil, err
+	}
+	provider.storeCAPool(pool)
+	return provider, nil
 }
 
 // SetUpdateHandler sets the function called after valid TLS material is stored.
@@ -156,6 +176,14 @@ func (t *TLSFileProvider) Watch(ctx context.Context) error {
 		}
 	}
 
+	// Re-read the agent's public CA file after registering its watch to catch
+	// replacements made between the initial load and registration.
+	if t.publicCAOnly && t.CAPath != "" && ctx.Err() == nil {
+		if err := t.caOnChange(); err != nil {
+			return err
+		}
+	}
+
 	for {
 		select {
 		case event, ok := <-watcher.Events:
@@ -191,15 +219,20 @@ func (t *TLSFileProvider) OnChange(ctx context.Context, event fsnotify.Event) er
 		logfields.Event:    event.Op,
 	}).Info("Change detected in TLS data, updating internal store")
 
-	if filepath.Base(event.Name) == "..data" {
+	// When watching the current directory, fsnotify can report a write to
+	// "ca.crt" as "./ca.crt". Clean both paths so the event triggers a reload.
+	eventPath := filepath.Clean(event.Name)
+	matchesPath := func(configuredPath string) bool {
+		return event.Name != "" && configuredPath != "" && eventPath == filepath.Clean(configuredPath)
+	}
+
+	switch {
+	case filepath.Base(event.Name) == "..data":
 		err = t.Reload(ctx)
-	} else {
-		switch event.Name {
-		case t.CAPath:
-			err = t.caOnChange()
-		case t.ClientCertPath, t.ClientKeyPath:
-			err = t.clientOnChange()
-		}
+	case matchesPath(t.CAPath):
+		err = t.caOnChange()
+	case matchesPath(t.ClientCertPath), matchesPath(t.ClientKeyPath):
+		err = t.clientOnChange()
 	}
 	if err == nil {
 		logrus.Info("Successfully updated TLS configuration to have new data")
@@ -235,23 +268,50 @@ func (t *TLSFileProvider) clientOnChange() error {
 	return nil
 }
 
+func (t *TLSFileProvider) readCAPool() (*x509.CertPool, error) {
+	caPEM, err := os.ReadFile(t.CAPath)
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	if t.publicCAOnly {
+		certs, err := parsePublicCertificates(caPEM)
+		if err != nil {
+			return nil, fmt.Errorf("agent root CA file %q %w. Replace it with a PEM bundle containing only public CA certificates", t.CAPath, err)
+		}
+		if len(certs) == 0 {
+			return nil, fmt.Errorf("invalid PEM data in %s", t.CAPath)
+		}
+		hasCurrent, err := addPublicCAs(pool, certs, time.Now())
+		if err != nil {
+			return nil, fmt.Errorf("agent root CA file %q %w. Use only CA certificates in this bundle", t.CAPath, err)
+		}
+		if !hasCurrent {
+			return nil, fmt.Errorf("agent root CA file %q contains no currently valid CA certificates", t.CAPath)
+		}
+		return pool, nil
+	}
+	if err := validateNewCACert(caPEM); err != nil {
+		return nil, err
+	}
+
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("invalid PEM data in %s", t.CAPath)
+	}
+	return pool, nil
+}
+
 // TLSFileProvider.caOnChange reads the file path the CA is located at and updates the TLS data if it is valid
 func (t *TLSFileProvider) caOnChange() error {
-	bytes, err := os.ReadFile(t.CAPath)
+	pool, err := t.readCAPool()
 	if err != nil {
-		return err
+		return fmt.Errorf("validation failed on CA cert file reload: %w", err)
 	}
+	t.storeCAPool(pool)
+	return nil
+}
 
-	if err := validateNewCACert(bytes); err != nil {
-		return fmt.Errorf("validation failed on CA cert file reload: %v", err)
-	}
-
-	certPool := x509.NewCertPool()
-	ok := certPool.AppendCertsFromPEM(bytes)
-	if !ok {
-		return fmt.Errorf("invalid certificate data in %s when updating", t.CAPath)
-	}
-
+func (t *TLSFileProvider) storeCAPool(pool *x509.CertPool) {
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
 
@@ -263,10 +323,8 @@ func (t *TLSFileProvider) caOnChange() error {
 
 	t.store(&TLSMaterial{
 		Cert:   cert,
-		CAPool: certPool,
+		CAPool: pool,
 	})
-
-	return nil
 }
 
 // TLSFileProvider.Reload reads the sources for the TLS data and sets them if they are new
@@ -289,22 +347,11 @@ func (t *TLSFileProvider) Reload(ctx context.Context) error {
 	}
 
 	if t.CAPath != "" {
-		bytes, err := os.ReadFile(t.CAPath)
+		pool, err := t.readCAPool()
 		if err != nil {
-			return err
+			return fmt.Errorf("validation failed on reloading ca pool: %w", err)
 		}
-
-		if err = validateNewCACert(bytes); err == nil {
-			caPool := x509.NewCertPool()
-			ok := caPool.AppendCertsFromPEM(bytes)
-			if ok {
-				newMaterial.CAPool = caPool
-			} else {
-				return fmt.Errorf("failed to append ca pem to pool")
-			}
-		} else {
-			return fmt.Errorf("validation failed on reloading ca pool: %v", err)
-		}
+		newMaterial.CAPool = pool
 	}
 
 	t.writeMu.Lock()
@@ -327,6 +374,22 @@ func NewTLSSecretProvider(clientSecretName, caSecretName, namespace string, kube
 	provider.Material.Store(material)
 
 	return provider
+}
+
+// NewPublicCASecretProvider loads the agent's root CA Secret for hot reload.
+func NewPublicCASecretProvider(ctx context.Context, kubeClient kubernetes.Interface, namespace, name string) (*TLSSecretProvider, error) {
+	secret, err := kubeClient.CoreV1().Secrets(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("could not read root CA Secret %s/%s: %w", namespace, name, err)
+	}
+	provider := NewTLSSecretProvider("", name, namespace, kubeClient, nil)
+	provider.publicCAOnly = true
+	pool, err := provider.loadCAPool(secret)
+	if err != nil {
+		return nil, err
+	}
+	provider.store(&TLSMaterial{CAPool: pool})
+	return provider, nil
 }
 
 // SetUpdateHandler sets the function called after valid TLS material is stored.
@@ -466,27 +529,150 @@ func readTLSDataFromKey(caPool *x509.CertPool, key string, secret *corev1.Secret
 	return nil
 }
 
+// loadCAPool validates the Secret and loads the same CA fields at startup and on reload.
+func (t *TLSSecretProvider) loadCAPool(secret *corev1.Secret) (*x509.CertPool, error) {
+	if len(secret.Data) == 0 {
+		return nil, fmt.Errorf("%s/%s is empty", secret.Namespace, secret.Name)
+	}
+	if t.publicCAOnly {
+		return loadPublicCASecret(secret)
+	}
+
+	pool := x509.NewCertPool()
+	loaded := false
+	for _, key := range []string{tlsCertFieldName, "ca.crt"} {
+		if err := readTLSDataFromKey(pool, key, secret); err == nil {
+			loaded = true
+		}
+	}
+	if !loaded {
+		return nil, fmt.Errorf("%s/%s: no certs were found. Put valid CA certificates in ca.crt or tls.crt", secret.Namespace, secret.Name)
+	}
+	return pool, nil
+}
+
+func loadPublicCASecret(secret *corev1.Secret) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+	now := time.Now()
+	loaded, hasCurrent := false, false
+	for field, data := range secret.Data {
+		if len(data) == 0 {
+			continue
+		}
+		var (
+			certs []*x509.Certificate
+			err   error
+		)
+		if field == tlsKeyFieldName || field == "ca.key" {
+			err = fmt.Errorf("contains a private key")
+		} else {
+			certs, err = parsePublicCertificates(data)
+		}
+		if err == nil && len(certs) == 0 {
+			err = fmt.Errorf("contains no PEM certificates")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("agent root CA Secret %s/%s %w in field %q. Replace it with a Secret containing only public CA certificates", secret.Namespace, secret.Name, err, field)
+		}
+		if field != tlsCertFieldName && field != "ca.crt" {
+			continue
+		}
+		fieldHasCurrent, err := addPublicCAs(pool, certs, now)
+		if err != nil {
+			return nil, fmt.Errorf("agent root CA Secret %s/%s %w in field %q. Use only CA certificates in this field", secret.Namespace, secret.Name, err, field)
+		}
+		loaded = true
+		hasCurrent = hasCurrent || fieldHasCurrent
+	}
+	if !loaded {
+		return nil, fmt.Errorf("%s/%s: no certs were found. Put valid CA certificates in ca.crt or tls.crt", secret.Namespace, secret.Name)
+	}
+	if !hasCurrent {
+		return nil, fmt.Errorf("agent root CA Secret %s/%s contains no currently valid CA certificates in ca.crt or tls.crt", secret.Namespace, secret.Name)
+	}
+	return pool, nil
+}
+
+func addPublicCAs(pool *x509.CertPool, certs []*x509.Certificate, now time.Time) (bool, error) {
+	hasCurrent := false
+	for _, cert := range certs {
+		if !cert.IsCA {
+			return false, fmt.Errorf("contains a leaf certificate")
+		}
+		// Keep every CA in the bundle. TLS checks dates on the chain it uses.
+		pool.AddCert(cert)
+		if !now.Before(cert.NotBefore) && !now.After(cert.NotAfter) {
+			hasCurrent = true
+		}
+	}
+	return hasCurrent, nil
+}
+
+// parsePublicCertificates parses each certificate and checks the surrounding text.
+func parsePublicCertificates(data []byte) ([]*x509.Certificate, error) {
+	// PEM may include text comments. Check every byte for binary data because
+	// pem.Decode can skip bytes before, between, and after PEM blocks.
+	if !utf8.Valid(data) || bytes.ContainsFunc(data, func(r rune) bool {
+		return unicode.IsControl(r) && !unicode.IsSpace(r)
+	}) {
+		return nil, fmt.Errorf("contains unexpected binary data")
+	}
+
+	var certs []*x509.Certificate
+	begin, end := []byte("\n-----BEGIN "), []byte("\n-----END ")
+	for len(data) > 0 {
+		if !bytes.HasPrefix(data, begin[1:]) {
+			line, rest, _ := bytes.Cut(data, []byte("\n"))
+			line = bytes.TrimSpace(line)
+			if len(line) != 0 && line[0] != '#' {
+				return nil, fmt.Errorf("contains unexpected text outside PEM blocks")
+			}
+			data = rest
+			continue
+		}
+
+		block, rest := pem.Decode(data)
+		if block == nil {
+			return nil, fmt.Errorf("contains malformed PEM data")
+		}
+		// Decode can skip a malformed block and return a later block instead.
+		consumed := data[:len(data)-len(rest)]
+		if bytes.Contains(consumed, begin) || bytes.Count(consumed, end) != 1 {
+			return nil, fmt.Errorf("contains malformed PEM data")
+		}
+		if block.Type == "CERTIFICATE" && len(block.Headers) == 0 {
+			if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
+				certs = append(certs, cert)
+				data = rest
+				continue
+			}
+		}
+		// Recognize key labels (including encrypted keys) and mislabeled key payloads.
+		if block.Type == "PRIVATE KEY" || strings.HasSuffix(block.Type, " PRIVATE KEY") || isPrivateKeyDER(block.Bytes) {
+			return nil, fmt.Errorf("contains a private key")
+		}
+		return nil, fmt.Errorf("contains an invalid or unexpected PEM block")
+	}
+	return certs, nil
+}
+
+// isPrivateKeyDER detects supported unencrypted keys whose PEM label may be incorrect.
+func isPrivateKeyDER(der []byte) bool {
+	if _, err := x509.ParsePKCS8PrivateKey(der); err == nil {
+		return true
+	}
+	if _, err := x509.ParsePKCS1PrivateKey(der); err == nil {
+		return true
+	}
+	_, err := x509.ParseECPrivateKey(der)
+	return err == nil
+}
+
 // TLSSecretProvider.caOnChange handles changing a ca cert from a Kubernetes secret
 func (t *TLSSecretProvider) caOnChange(secret *corev1.Secret) error {
-	if len(secret.Data) == 0 {
-		return fmt.Errorf("%s/%s is empty", secret.Namespace, secret.Name)
-	}
-
-	caPool := x509.NewCertPool()
-	certsInPool := 0
-
-	err := readTLSDataFromKey(caPool, "tls.crt", secret)
-	if err == nil {
-		certsInPool++
-	}
-
-	err = readTLSDataFromKey(caPool, "ca.crt", secret)
-	if err == nil {
-		certsInPool++
-	}
-
-	if certsInPool == 0 {
-		return fmt.Errorf("no certs were found under correct keys, please  use ca.crt or tls.crt")
+	caPool, err := t.loadCAPool(secret)
+	if err != nil {
+		return err
 	}
 
 	t.writeMu.Lock()
@@ -510,39 +696,24 @@ func (t *TLSSecretProvider) Reload(ctx context.Context) error {
 	logrus.Info("Reloading TLS data")
 	newMaterial := &TLSMaterial{}
 
-	cert, err := TLSCertFromSecret(ctx, t.kubeClient, t.Namespace, t.ClientSecretName)
-	if err != nil {
-		return err
-	}
-	if err = validateNewClientCert(cert); err == nil {
+	if t.ClientSecretName != "" {
+		cert, err := TLSCertFromSecret(ctx, t.kubeClient, t.Namespace, t.ClientSecretName)
+		if err != nil {
+			return err
+		}
+		if err := validateNewClientCert(cert); err != nil {
+			return fmt.Errorf("failed to validate new client cert: %v", err)
+		}
 		newMaterial.Cert = cert
-	} else {
-		return fmt.Errorf("failed to validate new client cert: %v", err)
 	}
 
-	caPool := x509.NewCertPool()
 	caSecret, err := t.kubeClient.CoreV1().Secrets(t.Namespace).Get(ctx, t.CASecretName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
-
-	certsInPool := 0
-	if caSecret != nil {
-		err := readTLSDataFromKey(caPool, "tls.crt", caSecret)
-		if err == nil {
-			certsInPool++
-		}
-
-		err = readTLSDataFromKey(caPool, "ca.crt", caSecret)
-		if err == nil {
-			certsInPool++
-		}
-	}
-
-	if certsInPool > 0 {
-		newMaterial.CAPool = caPool
-	} else {
-		return fmt.Errorf("no certs loaded on reload")
+	newMaterial.CAPool, err = t.loadCAPool(caSecret)
+	if err != nil {
+		return err
 	}
 
 	t.writeMu.Lock()

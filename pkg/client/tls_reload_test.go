@@ -21,6 +21,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"net"
 	"net/url"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/tlsutil"
+	"github.com/argoproj-labs/argocd-agent/pkg/types"
 	fakecerts "github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/fsnotify/fsnotify"
 	"github.com/sirupsen/logrus"
@@ -366,6 +368,73 @@ func Test_WithRootCAReload(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "agent-v1", certificateName(t, cert))
 	})
+}
+
+func Test_WithRootCAReloadRejectsPrivateKeys(t *testing.T) {
+	caPEM, caKeyPEM := caTestCertificate(t)
+	wantPool := certPool(t, caPEM)
+	const host = "principal.example.com"
+
+	key, _ := pem.Decode([]byte(caKeyPEM))
+	require.NotNil(t, key)
+	mislabeledKey := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: key.Bytes})
+	mislabeledBundle := caPEM + string(mislabeledKey)
+
+	t.Run("file", func(t *testing.T) {
+		files := newMountedFiles(t, map[string]string{"ca.crt": caPEM})
+		caPath := files.path("ca.crt")
+		option := WithRootCAReloadFromFile(caPath)
+		remote, err := NewRemote(host, 443, option)
+		require.NoError(t, err)
+
+		files.update(t, map[string]string{"ca.crt": caPEM + caKeyPEM})
+		for _, mode := range []types.AgentMode{types.AgentModeManaged, types.AgentModeAutonomous} {
+			_, err := NewRemote(host, 443, WithClientMode(mode), option)
+			require.ErrorContains(t, err, fmt.Sprintf("root CA file %q contains a private key", caPath))
+		}
+
+		provider := fileProvider(t, remote.caSource)
+		require.ErrorContains(t, provider.OnChange(t.Context(), files.swapEvent()), "contains a private key")
+		require.ErrorContains(t, provider.OnChange(t.Context(), fsnotify.Event{Name: caPath, Op: fsnotify.Write}), "contains a private key")
+		require.True(t, wantPool.Equal(remote.tlsConfigForDial().RootCAs))
+	})
+
+	t.Run("file with mislabeled private key", func(t *testing.T) {
+		files := newMountedFiles(t, map[string]string{"ca.crt": mislabeledBundle})
+		caPath := files.path("ca.crt")
+		_, err := NewRemote(host, 443, WithRootCAReloadFromFile(caPath))
+		require.ErrorContains(t, err, fmt.Sprintf("root CA file %q contains a private key", caPath))
+	})
+
+	for field, data := range map[string][]byte{
+		"tls.key": []byte(caKeyPEM),
+		"ca.key":  key.Bytes,
+		"ca.crt":  []byte(caPEM + caKeyPEM),
+		"tls.crt": []byte(caPEM + caKeyPEM),
+		"other":   []byte(mislabeledBundle),
+	} {
+		t.Run("Secret field "+field, func(t *testing.T) {
+			secret := caSecret(caPEM)
+			kube := fake.NewSimpleClientset(secret)
+			option := WithRootCAReloadFromSecret(kube, secret.Namespace, secret.Name)
+			remote, err := NewRemote(host, 443, option)
+			require.NoError(t, err)
+
+			updated := secret.DeepCopy()
+			updated.Data[field] = data
+			_, err = kube.CoreV1().Secrets(secret.Namespace).Update(t.Context(), updated, metav1.UpdateOptions{})
+			require.NoError(t, err)
+			wantErr := fmt.Sprintf("root CA Secret %s/%s contains a private key in field %q", secret.Namespace, secret.Name, field)
+			_, err = NewRemote(host, 443, option)
+			require.ErrorContains(t, err, wantErr)
+
+			provider, ok := remote.caSource.(*tlsutil.TLSSecretProvider)
+			require.True(t, ok)
+			require.ErrorContains(t, provider.OnChange(updated), wantErr)
+			require.ErrorContains(t, provider.Reload(t.Context()), wantErr)
+			require.True(t, wantPool.Equal(remote.tlsConfigForDial().RootCAs))
+		})
+	}
 }
 
 // Test_noteClientCertificate checks that each new client certificate is logged

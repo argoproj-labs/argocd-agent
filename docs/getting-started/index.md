@@ -121,8 +121,8 @@ You must be able to expose certain services on the control plane cluster, such a
 
 ### PKI
 
-The *argocd-agent* components make use of mTLS for validating authenticity and identity of its peers. This requires the use client certificates, and the certificate of the CA needs to be known by each peer.
+With static mTLS, the agent uses a public CA bundle to verify the principal's server certificate. The principal uses its own trust bundle to verify each agent's client certificate. Distribute only the public CA certificates to workload clusters and provision each agent's client certificate and private key separately. See [TLS & Certificates](../configuration/tls-certificates.md) for setup instructions.
 
-If you have a PKI already established, you can use it issue client certificates for each of your agents, as long as you make its identity known to all components.
+If you already have a PKI, you can use it to issue client certificates for your agents and configure the principal to recognize their identities. See [mTLS certificate requirements](../configuration/authentication.md#certificate-requirements).
 
 For testing purposes, we deliver a CLI tool ("*argocd-agentctl*") that can setup a bare-bones PKI for you, and makes it easy to issue the correct certificates to the right places. This tool is highly experimental, and it should **under no circumstances** be used for production purposes.

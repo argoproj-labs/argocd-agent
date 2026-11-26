@@ -108,11 +108,12 @@ argocd-agentctl pki issue agent <agent-name> \
   --upsert
 ```
 
-This command:
+The command signs a client certificate with the principal's CA, sets its subject to the agent's name, and creates two Secrets in the workload cluster.
 
-- Generates a client certificate signed by the principal's CA
-- Stores the certificate in the agent's cluster as a Kubernetes secret
-- Configures the certificate with the agent's name as the subject
+- `argocd-agent-client-tls` contains the agent's client certificate and private key.
+- `argocd-agent-ca` contains only the public CA certificate the agent uses to verify the principal.
+
+When provisioning TLS through your own PKI, follow the [agent root CA requirements](../configuration/tls-certificates.md#agent-client-certificate-reload).
 
 ## Step 4: Create Agent Namespace
 

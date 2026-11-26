@@ -89,7 +89,9 @@ data:
   agent.log.level: "info"
   agent.creds: "mtls:^CN=(.+)$"
   agent.tls.client.insecure: "false"
+  # Public CA certificates for verifying the principal.
   agent.tls.root-ca-secret-name: "argocd-agent-ca"
+  # The agent's own client certificate and private key.
   agent.tls.secret-name: "argocd-agent-client-tls"
 ```
 

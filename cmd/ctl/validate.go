@@ -353,7 +353,7 @@ func RunAgentChecks(ctx context.Context, agentKubeClient *kube.KubernetesClient,
 		principalCASecretName = config.SecretNamePrincipalCA
 	}
 
-	// Agent CA secret exists and has CA data (opaque secret with ca.crt)
+	// Validate the agent root CA Secret using the same checks as startup.
 	out = append(out, checkResult{
 		name: fmt.Sprintf("Verifying agent CA secret exists and contains CA cert (%s/%s)", agentNS, agentCASecretName),
 		err:  agentCASecretValid(ctx, agentKubeClient.Clientset, agentNS, agentCASecretName),
@@ -798,19 +798,7 @@ func principalVerifyDeployedComponents(ctx context.Context, kc *kube.KubernetesC
 }
 
 func agentCASecretValid(ctx context.Context, kubeClient kubernetes.Interface, ns, name string) error {
-	sec, err := kubeClient.CoreV1().Secrets(ns).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	if len(sec.Data) == 0 {
-		return fmt.Errorf("%s/%s: empty secret", ns, name)
-	}
-	// Expect a "ca.crt" field with PEM data
-	if _, ok := sec.Data["ca.crt"]; !ok {
-		return fmt.Errorf("%s/%s: missing ca.crt field", ns, name)
-	}
-	// Validate PEM parses into certs
-	_, err = tlsutil.X509CertPoolFromSecret(ctx, kubeClient, ns, name, "ca.crt")
+	_, err := tlsutil.NewPublicCASecretProvider(ctx, kubeClient, ns, name)
 	return err
 }
 

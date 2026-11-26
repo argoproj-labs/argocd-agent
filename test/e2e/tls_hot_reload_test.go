@@ -350,7 +350,7 @@ func (suite *TLSHotReloadTestSuite) Test_AgentExitsOnInvalidRootCA() {
 	restore := suite.updateAgentSecret(agentCASecretName, map[string][]byte{"ca.crt": []byte("not a certificate")})
 	defer restore()
 
-	suite.requireAgentExit("Failed to change certificates", "no certs were found under correct keys")
+	suite.requireAgentExit("Failed to change certificates", "contains unexpected text outside PEM blocks")
 }
 
 // Test_AgentUsesSwappedClientCertificateFileWithoutRestart swaps the agent's
@@ -403,7 +403,7 @@ func (suite *TLSHotReloadTestSuite) Test_AgentExitsOnInvalidRootCAFile() {
 	files[hotReloadCACertFileName] = "not a certificate"
 	swapCertFiles(suite.T(), dir, filepath.Join(dir, "invalid"), files)
 
-	suite.requireAgentExit("TLS hot reload watch failed", "validation failed on reloading ca pool")
+	suite.requireAgentExit("TLS hot reload watch failed", "contains unexpected text outside PEM blocks")
 }
 
 // startAgentWithCertFiles writes a new client certificate and the agent's root

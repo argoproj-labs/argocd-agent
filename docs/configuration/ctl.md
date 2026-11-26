@@ -208,7 +208,7 @@ OR TO PROTECT ANY KIND OF DATA.
 
 `delete` - Delete the configured PKI
 
-`dump` - Print PKI's CA data in PEM format to stdout
+`dump` - Print PKI's CA data in PEM format to stdout. Use `--cert` to export only the public CA certificate for an agent.
 
 `init` - NON-PROD!! Initialize the PKI for use with argocd-agent
 
@@ -220,9 +220,11 @@ OR TO PROTECT ANY KIND OF DATA.
 
   Subcommands: `principal`, `resource-proxy`, `agent <name>`, `ha-admin`
 
+  `issue agent <name>` creates the agent's client certificate and private key in `argocd-agent-client-tls` and copies the public CA certificate to `argocd-agent-ca` on the workload cluster.
+
   - `--days`: Certificate validity in days (default: 180, ~6 months). For leaf certificates, must not exceed the signing CA's remaining validity.
   - `ha-admin` specific flags:
     - `--name`: Common name for the admin certificate (default: `ha-admin`)
     - `--upsert`: Update an existing certificate if it exists
 
-`propagate` - NON-PROD!! Propagate the PKI to the agent
+`propagate` - NON-PROD!! Copy the public CA certificate to the agent's `argocd-agent-ca` Secret

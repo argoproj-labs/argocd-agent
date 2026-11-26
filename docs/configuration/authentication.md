@@ -112,6 +112,8 @@ argocd-agent agent \
   --root-ca-secret-name=argocd-agent-ca
 ```
 
+On the workload cluster, `argocd-agent-ca` holds only the public CA certificates the agent uses to verify the principal. `argocd-agent-client-tls` holds the agent's own certificate and private key. See [TLS & Certificates](tls-certificates.md#agent-client-certificate-reload) for the root CA requirements.
+
 ### Certificate Requirements
 
 For mTLS to work properly:
@@ -347,7 +349,7 @@ agent.creds: "userpass:/app/config/creds/userpass.creds"
    kubectl get secret argocd-agent-client-tls -n argocd
    ```
 
-2. Verify certificate is signed by correct CA:
+2. Verify the agent's client certificate against the CA the principal uses to authenticate agents. In the built-in PKI, both sides use the same CA, so you can use the agent's public CA copy.
    ```bash
    # Get CA cert
    kubectl get secret argocd-agent-ca -n argocd -o jsonpath='{.data.ca\.crt}' | base64 -d > ca.crt
