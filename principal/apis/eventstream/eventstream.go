@@ -424,24 +424,28 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 		}
 	}
 
-	s.activeClientsMu.Lock()
-	s.activeClients[c.agentName] = c
-	s.activeClientsMu.Unlock()
+	target := s.observeSubscribeSendErrors(c, subs)
 
-	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
+	// Become the agent's active client, preempt whichever client we replace,
+	// and take over its event writer - all under one lock.
+	// The new client is registered before the previous one is canceled, so that
+	// the previous client's onDisconnect sees that it is no longer the active
+	// client and leaves this connection's status alone. The previous client is
+	// canceled before its target is replaced, so its event writer loop stops
+	// aiming at the old stream rather than at ours.
+	s.activeClientsMu.Lock()
+
+	previous := s.activeClients[c.agentName]
+	s.activeClients[c.agentName] = c
 
 	if s.metrics != nil {
-		// increase counter to track how many agents are currently connected with principal
-		s.metrics.AgentConnected.Inc()
-
-		// increase counter to track how many times an agent has connected/reconnected to principal
-		s.metrics.AgentConnectionCount.WithLabelValues(c.agentName).Inc()
-
-		// store connection time to find average connection time of all agents
 		metrics.SetAgentConnectionTime(c.agentName, c.start)
 	}
 
-	target := s.observeSubscribeSendErrors(c, subs)
+	if previous != nil && previous != c {
+		previous.cancelFn()
+	}
+
 	eventWriter := s.eventWriters.Get(c.agentName)
 	if eventWriter != nil {
 		eventWriter.UpdateTarget(target)
@@ -454,6 +458,25 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 			})
 		}
 		s.eventWriters.Add(c.agentName, eventWriter)
+	}
+	s.activeClientsMu.Unlock()
+
+	if previous != nil && previous != c {
+		// An agent is only ever expected to hold one Subscribe stream.
+		previous.logCtx.WithFields(logrus.Fields{
+			"previous_client_addr": grpcutil.AddressFromContext(previous.ctx),
+			"new_client_addr":      grpcutil.AddressFromContext(subs.Context()),
+		}).Warn("Agent connected while a previous stream was still active, disconnecting the previous stream")
+	}
+
+	s.clusterMgr.SetAgentConnectionStatus(c.agentName, v1alpha1.ConnectionStatusSuccessful, c.start)
+
+	if s.metrics != nil {
+		// increase counter to track how many agents are currently connected with principal
+		s.metrics.AgentConnected.Inc()
+
+		// increase counter to track how many times an agent has connected/reconnected to principal
+		s.metrics.AgentConnectionCount.WithLabelValues(c.agentName).Inc()
 	}
 
 	go eventWriter.SendWaitingEvents(c.ctx)
@@ -523,14 +546,18 @@ func (s *Server) Subscribe(subs eventstreamapi.EventStream_SubscribeServer) erro
 	s.activeClientsMu.Lock()
 	if s.activeClients[c.agentName] == c {
 		delete(s.activeClients, c.agentName)
+
+		if s.metrics != nil {
+			metrics.DeleteAgentConnectionTime(c.agentName)
+		}
 	}
 	s.activeClientsMu.Unlock()
 
 	if s.metrics != nil {
-		// decrease counter when an agent is disconnected with principal
+		// decrease counter when an agent is disconnected with principal.
+		// Every Subscribe increments this once, so every Subscribe has to
+		// decrement it once, preempted or not.
 		s.metrics.AgentConnected.Dec()
-		// remove connection time of agent
-		metrics.DeleteAgentConnectionTime(c.agentName)
 	}
 
 	return nil
@@ -548,6 +575,12 @@ func (s *Server) DisconnectAll() {
 	s.activeClientsMu.Lock()
 	clients := s.activeClients
 	s.activeClients = make(map[string]*client)
+
+	if s.metrics != nil {
+		for name := range clients {
+			metrics.DeleteAgentConnectionTime(name)
+		}
+	}
 	s.activeClientsMu.Unlock()
 
 	for name, c := range clients {
@@ -568,6 +601,10 @@ func (s *Server) DisconnectAgent(agentName string) bool {
 		return false
 	}
 	delete(s.activeClients, agentName)
+
+	if s.metrics != nil {
+		metrics.DeleteAgentConnectionTime(agentName)
+	}
 	s.activeClientsMu.Unlock()
 
 	s.clusterMgr.SetAgentConnectionStatus(agentName, v1alpha1.ConnectionStatusFailed, time.Now())
