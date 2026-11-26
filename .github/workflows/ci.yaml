@@ -52,7 +52,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Golang
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
       - name: Download all Go modules
         run: |
           go mod download
@@ -70,7 +72,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Golang
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
       - name: Download all Go modules
         run: |
           go mod download
@@ -97,7 +101,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Golang
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
@@ -117,7 +123,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Golang
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
       - name: Download all Go modules
         run: |
           go mod download
@@ -151,13 +159,15 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Golang
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
       - name: Download all Go modules
         run: |
           go mod download
       - name: Run all unit tests
         run: |
-          GOTOOLCHAIN=go1.26.3+auto make test
+          make test
       - name: Upload coverage results
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
@@ -198,7 +208,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Golang
-        uses: actions/setup-go@0c52d547c9bc32b1aa3301fd7a9cb496313a4491 # v5.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       - name: GH actions workaround - Kill XSP4 process
