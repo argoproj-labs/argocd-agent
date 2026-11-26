@@ -141,8 +141,8 @@ data:
   #   First capture group becomes the agent ID. Requires insecure-plaintext mode.
   #   Example for Istio SPIFFE URIs:
   #   "header:x-forwarded-client-cert:^.*URI=spiffe://[^/]+/ns/[^/]+/sa/([^,;]+)"
-  # Default: "mtls:CN=([^,]+)"
-  principal.auth: "mtls:CN=([^,]+)"
+  # Default: "mtls:subject:CN=([^,]+)"
+  principal.auth: "mtls:subject:CN=([^,]+)"
   # principal.log.format: The log format principal should use. Valid values are
   # "json" or "text".
   # Default: "text"

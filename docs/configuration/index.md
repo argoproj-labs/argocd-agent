@@ -70,7 +70,7 @@ data:
   principal.tls.secret-name: "argocd-agent-principal-tls"
   principal.tls.server.root-ca-secret-name: "argocd-agent-ca"
   principal.tls.client-cert.require: "true"
-  principal.auth: "mtls:CN=([^,]+)"
+  principal.auth: "mtls:subject:CN=([^,]+)"
 ```
 
 ### Agent ConfigMap Example
@@ -118,7 +118,7 @@ This section is organized by task to help you find what you need:
 ```yaml
 # ConfigMap
 principal.namespace: "argocd"
-principal.auth: "mtls:CN=([^,]+)"
+principal.auth: "mtls:subject:CN=([^,]+)"
 principal.tls.client-cert.require: "true"
 ```
 

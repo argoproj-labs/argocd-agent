@@ -94,7 +94,7 @@ echo "Starting PRIMARY principal (preferred role: primary)..."
     --kubecontext vcluster-control-plane \
     --log-level debug \
     --namespace ${ARGOCD_PRINCIPAL_NAMESPACE} \
-    --auth "mtls:CN=([^,]+)" \
+    --auth "mtls:subject:CN=([^,]+)" \
     --ha-enabled \
     --ha-preferred-role primary \
     --ha-peer-address "localhost:$REPLICA_PORT" \
@@ -114,7 +114,7 @@ echo "Starting REPLICA principal (preferred role: replica)..."
     --kubecontext vcluster-control-plane \
     --log-level debug \
     --namespace ${ARGOCD_PRINCIPAL_NAMESPACE} \
-    --auth "mtls:CN=([^,]+)" \
+    --auth "mtls:subject:CN=([^,]+)" \
     --ha-enabled \
     --ha-preferred-role replica \
     --ha-peer-address "localhost:$PRIMARY_PORT" \
