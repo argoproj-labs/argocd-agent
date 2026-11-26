@@ -927,6 +927,12 @@ func (s *Server) Start(ctx context.Context, errch chan error) error {
 	if s.options.tlsHotReload && s.tlsSource != nil {
 		go func() {
 			for {
+				select {
+				case <-s.ctx.Done():
+					log().Info("TLS Hot Reload Watch has exited")
+					return
+				default:
+				}
 				if err := s.tlsSource.Watch(s.ctx); err != nil {
 					log().WithError(err).Fatal("TLS hot reload watch failed")
 				} else {

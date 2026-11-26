@@ -163,8 +163,8 @@ func (s *Server) processTerminalRequest(w http.ResponseWriter, r *http.Request, 
 		logCtx.Warn("Web terminal session timeout after 30 minutes")
 	}
 
-	// Ensure channels are closed to terminate the agent web terminal stream
-	closeTerminalStreamChannels(session)
+	// Ensure the session is closed to terminate the agent web terminal stream.
+	session.Close()
 
 	logCtx.Info("Web terminal session unregistered")
 }
@@ -233,10 +233,20 @@ func (s *Server) agentToWebSocketChannel(session *terminalstream.TerminalSession
 	}()
 
 	for {
-		data, ok := <-session.FromAgent
-		if !ok {
-			logCtx.Info("FromAgent channel closed")
+		var data *terminalstreamapi.TerminalStreamData
+		var ok bool
+		select {
+		case <-session.Done:
+			logCtx.Info("Terminal session closed")
 			return
+		case data, ok = <-session.FromAgent:
+			// Nothing closes FromAgent during normal operation -- Done is the
+			// termination signal -- but stay defensive so a closed channel
+			// cannot turn into a nil dereference below.
+			if !ok {
+				logCtx.Info("FromAgent channel closed")
+				return
+			}
 		}
 
 		if data.Error != "" {
@@ -399,16 +409,4 @@ func notifyWebSocketEOF(wsConn *websocket.Conn, done <-chan struct{}, logCtx *lo
 			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
 		)
 	}
-}
-
-// closeTerminalStreamChannels closes the channels for the web terminal session
-func closeTerminalStreamChannels(session *terminalstream.TerminalSession) {
-	safeCloseTerminalStreamDataChan(session.ToAgent)
-	safeCloseTerminalStreamDataChan(session.FromAgent)
-}
-
-// safeCloseTerminalStreamDataChan safely closes the channel
-func safeCloseTerminalStreamDataChan(ch chan *terminalstreamapi.TerminalStreamData) {
-	defer func() { _ = recover() }()
-	close(ch)
 }

@@ -108,18 +108,15 @@ func (s *Server) StreamTerminal(stream terminalstreamapi.TerminalStreamService_S
 
 	// Handle incoming data from agent and send to WebSocket
 	go func() {
+		// Closing the session closes Done, which is the single termination
+		// signal for every goroutine involved in this session. The ToAgent and
+		// FromAgent channels are deliberately never closed: senders on them run
+		// in other goroutines, and closing a channel out from under a concurrent
+		// sender makes the send panic. They become garbage along with the
+		// session once all parties have exited.
 		defer func() {
 			termSession.Close()
-			// Close the channels when agent finishes to terminate the terminal
-			func() {
-				defer func() { _ = recover() }()
-				close(termSession.ToAgent)
-			}()
-			func() {
-				defer func() { _ = recover() }()
-				close(termSession.FromAgent)
-			}()
-			logCtx.Info("Agent to WebSocket goroutine exited, channels closed")
+			logCtx.Info("Agent to WebSocket goroutine exited, session closed")
 		}()
 
 		// Send handshake message to WebSocket
@@ -159,12 +156,10 @@ func (s *Server) StreamTerminal(stream terminalstreamapi.TerminalStreamService_S
 		case <-stream.Context().Done():
 			logCtx.Info("Terminal stream context done due to user closing the terminal")
 			return stream.Context().Err()
-		case msg, ok := <-termSession.ToAgent:
-			if !ok {
-				logCtx.Info("ToAgent channel closed, terminal stream terminated")
-				return nil
-			}
-
+		case <-termSession.Done:
+			logCtx.Info("Terminal session closed, terminal stream terminated")
+			return nil
+		case msg := <-termSession.ToAgent:
 			if err := stream.Send(msg); err != nil {
 				logCtx.WithError(err).Error("Failed to send data to agent")
 				return err
