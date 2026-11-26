@@ -130,11 +130,16 @@ stringData:
   project: agent-production-my-project  # optional; must use the principal-side name
 ```
 
-A repository secret without a `project` field, or a repo-creds template whose URL prefix matches the repository, also works.
+A repository secret without a `project` field, or a repo-creds template whose URL prefix matches the repository, also works. A repo-creds template is only used when the matching repository secret has no credentials of its own. If a repository secret for the same URL already has credentials (for example, an expired token), Argo CD uses those instead, so update or remove that secret.
 
 ### Syncing to a full commit SHA
 
 If you don't want any repository credentials on the control plane, you can still sync by passing a full 40-character commit SHA as the revision, for example `argocd app sync <agent-name>/<app-name> --revision <full-commit-sha>`. Argo CD does not contact the repository to resolve a full commit SHA for Git sources. Branch names, tags and short SHAs still require a credential on the control plane.
+
+This workaround has some limits:
+
+- **Automated sync**: if the Application has automated sync enabled, Argo CD rejects a revision that differs from the Application's `targetRevision`. In that case, either set `targetRevision` to the full commit SHA on the agent, or provide a credential on the control plane.
+- **Multi-source Applications**: the CLI does not accept `--revision` for multi-source Applications. Use `--revisions` together with `--source-positions` (or `--source-names`) for each source, for example `argocd app sync <agent-name>/<app-name> --revisions <full-commit-sha> --source-positions 1`. Every private source whose revision is a branch, tag or short SHA needs either its own full-SHA override or a credential on the control plane.
 
 ## More Information
 
