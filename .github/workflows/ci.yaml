@@ -53,6 +53,8 @@ jobs:
           persist-credentials: false
       - name: Setup Golang
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
       - name: Download all Go modules
         run: |
           go mod download
@@ -71,6 +73,8 @@ jobs:
           persist-credentials: false
       - name: Setup Golang
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
       - name: Download all Go modules
         run: |
           go mod download
@@ -98,6 +102,8 @@ jobs:
           persist-credentials: false
       - name: Setup Golang
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
@@ -118,6 +124,8 @@ jobs:
           persist-credentials: false
       - name: Setup Golang
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
       - name: Download all Go modules
         run: |
           go mod download
@@ -152,12 +160,14 @@ jobs:
           persist-credentials: false
       - name: Setup Golang
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
       - name: Download all Go modules
         run: |
           go mod download
       - name: Run all unit tests
         run: |
-          GOTOOLCHAIN=go1.26.3+auto make test
+          make test
       - name: Upload coverage results
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4.6.0
         with:
