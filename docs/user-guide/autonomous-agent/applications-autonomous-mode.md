@@ -85,6 +85,9 @@ In autonomous mode, the agent is the source of truth:
 - **Agent → Principal**: Both spec and status changes
 - **Principal → Agent**: Spec modifications are reverted; sync and terminate operations are forwarded
 
+!!! note "Syncing private repositories from the control plane"
+    Before forwarding a sync, Argo CD on the control plane resolves the target revision, which needs a credential for the repository on the control plane. See [Syncing from the control plane](repository.md#syncing-from-the-control-plane).
+
 The principal serves as a centralized view of all Applications across autonomous agents but doesn't control their configuration.
 
 ### Lifecycle Management
