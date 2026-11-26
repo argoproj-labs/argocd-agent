@@ -138,8 +138,8 @@ If you don't want any repository credentials on the control plane, you can still
 
 This workaround has some limits:
 
-- **Automated sync**: if the Application has automated sync enabled, Argo CD rejects a revision that differs from the Application's `targetRevision`. In that case, either set `targetRevision` to the full commit SHA on the agent, or provide a credential on the control plane.
-- **Multi-source Applications**: the CLI does not accept `--revision` for multi-source Applications. Use `--revisions` together with `--source-positions` (or `--source-names`) for each source, for example `argocd app sync <agent-name>/<app-name> --revisions <full-commit-sha> --source-positions 1`. Every private source whose revision is a branch, tag or short SHA needs either its own full-SHA override or a credential on the control plane.
+- **Automated sync**: if the Application has automated sync enabled, Argo CD rejects a revision that differs from the Application's `targetRevision`. This also applies when the control plane has a credential. To sync to a specific commit, set `targetRevision` to the full commit SHA on the agent. To sync the current `targetRevision`, provide a credential on the control plane and sync without a revision override.
+- **Multi-source Applications**: the CLI does not accept `--revision` for multi-source Applications. Use `--revisions` together with `--source-positions` for each source, for example `argocd app sync <agent-name>/<app-name> --revisions <full-commit-sha> --source-positions 1`. Every private source whose revision is a branch, tag or short SHA needs either its own full-SHA override or a credential on the control plane.
 
 ## More Information
 
