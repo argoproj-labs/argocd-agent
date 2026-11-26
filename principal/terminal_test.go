@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -317,67 +318,79 @@ func TestNotifyWebSocketEOF(t *testing.T) {
 	})
 }
 
-// Test closeTerminalStreamChannels
-func TestCloseTerminalStreamChannels(t *testing.T) {
-	t.Run("safely closes both channels", func(t *testing.T) {
-		session := &terminalstream.TerminalSession{
+// Test that closing a terminal session is the single termination signal, and
+// that it is safe to do so concurrently with senders on the data channels.
+func TestTerminalSessionClose(t *testing.T) {
+	newSession := func() *terminalstream.TerminalSession {
+		return &terminalstream.TerminalSession{
 			ToAgent:   make(chan *terminalstreamapi.TerminalStreamData, 10),
 			FromAgent: make(chan *terminalstreamapi.TerminalStreamData, 10),
 			Done:      make(chan struct{}),
 		}
+	}
 
-		// Close should not panic
-		closeTerminalStreamChannels(session)
-
-		// Verify channels are closed
-		select {
-		case _, ok := <-session.ToAgent:
-			assert.False(t, ok, "ToAgent channel should be closed")
-		default:
-			t.Error("ToAgent channel should be closed and readable")
-		}
+	t.Run("signals Done", func(t *testing.T) {
+		session := newSession()
+		session.Close()
 
 		select {
-		case _, ok := <-session.FromAgent:
-			assert.False(t, ok, "FromAgent channel should be closed")
+		case <-session.Done:
 		default:
-			t.Error("FromAgent channel should be closed and readable")
+			t.Error("Done should be closed after Close()")
 		}
 	})
 
 	t.Run("safe to call multiple times", func(t *testing.T) {
-		session := &terminalstream.TerminalSession{
-			ToAgent:   make(chan *terminalstreamapi.TerminalStreamData, 10),
-			FromAgent: make(chan *terminalstreamapi.TerminalStreamData, 10),
-			Done:      make(chan struct{}),
-		}
-
-		// Should not panic on multiple calls
-		closeTerminalStreamChannels(session)
-		closeTerminalStreamChannels(session)
+		session := newSession()
+		session.Close()
+		session.Close()
 	})
-}
 
-// Test safeCloseTerminalStreamDataChan
-func TestSafeCloseTerminalStreamDataChan(t *testing.T) {
-	t.Run("closes open channel", func(t *testing.T) {
-		ch := make(chan *terminalstreamapi.TerminalStreamData, 10)
-		safeCloseTerminalStreamDataChan(ch)
+	t.Run("close leaves data channels open", func(t *testing.T) {
+		session := newSession()
+		session.Close()
 
 		select {
-		case _, ok := <-ch:
-			assert.False(t, ok, "channel should be closed")
+		case _, ok := <-session.ToAgent:
+			assert.True(t, ok, "ToAgent must not be closed by teardown")
 		default:
-			t.Error("channel should be readable after close")
+			// Empty and open, which is what we expect.
+		}
+
+		select {
+		case _, ok := <-session.FromAgent:
+			assert.True(t, ok, "FromAgent must not be closed by teardown")
+		default:
 		}
 	})
 
-	t.Run("does not panic on already closed channel", func(t *testing.T) {
-		ch := make(chan *terminalstreamapi.TerminalStreamData, 10)
-		close(ch)
+	// With the channels left open, a sender racing teardown must never panic.
+	t.Run("concurrent send and close does not panic", func(t *testing.T) {
+		logCtx := logrus.NewEntry(logrus.New())
+		s := &Server{}
 
-		// Should not panic
-		safeCloseTerminalStreamDataChan(ch)
+		for i := 0; i < 200; i++ {
+			// Buffer of 1, pre-filled, so the send cannot complete immediately
+			// and must race against the close.
+			session := &terminalstream.TerminalSession{
+				UUID:    "test-session",
+				ToAgent: make(chan *terminalstreamapi.TerminalStreamData, 1),
+				Done:    make(chan struct{}),
+			}
+			session.ToAgent <- &terminalstreamapi.TerminalStreamData{}
+
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				s.sendResizeToAgent(session, 80, 24, logCtx)
+			}()
+			go func() {
+				defer wg.Done()
+				session.Close()
+			}()
+			wg.Wait()
+		}
 	})
 }
 
