@@ -31,8 +31,8 @@ type Options struct {
 	// AdminPort is the port for the localhost-only admin gRPC server (HAAdmin)
 	AdminPort int
 
-	// AllowedReplicationClients is the list of identities allowed to connect
-	// for replication. When empty, any authenticated peer is allowed.
+	// AllowedReplicationClients is the explicit list of identities allowed to
+	// connect for replication. When empty, all replication requests are denied.
 	AllowedReplicationClients []string
 
 	ReconnectBackoffInitial time.Duration
@@ -130,10 +130,22 @@ func WithAdminPort(port int) Option {
 	}
 }
 
+// NormalizeAllowedReplicationClients trims whitespace from each identity and drops
+// empty entries so unset or blank values produce an empty allowlist.
+func NormalizeAllowedReplicationClients(clients []string) []string {
+	var normalized []string
+	for _, client := range clients {
+		if trimmed := strings.TrimSpace(client); trimmed != "" {
+			normalized = append(normalized, trimmed)
+		}
+	}
+	return normalized
+}
+
 // WithAllowedReplicationClients sets the list of identities allowed to connect for replication
 func WithAllowedReplicationClients(clients []string) Option {
 	return func(o *Options) error {
-		o.AllowedReplicationClients = clients
+		o.AllowedReplicationClients = NormalizeAllowedReplicationClients(clients)
 		return nil
 	}
 }

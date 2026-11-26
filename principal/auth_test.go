@@ -16,17 +16,30 @@ package principal
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math/big"
+	"net"
+	"regexp"
 	"testing"
+	"time"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
+	"github.com/argoproj-labs/argocd-agent/internal/auth/mtls"
 	issuermock "github.com/argoproj-labs/argocd-agent/internal/issuer/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/queue"
+	"github.com/argoproj-labs/argocd-agent/pkg/api/grpc/replicationapi"
+	"github.com/argoproj-labs/argocd-agent/pkg/ha"
+	"github.com/argoproj-labs/argocd-agent/pkg/replication"
 	"github.com/argoproj-labs/argocd-agent/pkg/types"
+	replicationserver "github.com/argoproj-labs/argocd-agent/principal/apis/replication"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -743,4 +756,368 @@ func (m *mockServerStream) SendHeader(metadata.MD) error {
 }
 
 func (m *mockServerStream) SetTrailer(metadata.MD) {
+}
+
+func newMTLSAuthPeerContext(t *testing.T, commonName string) context.Context {
+	t.Helper()
+	cert := &x509.Certificate{
+		Subject: pkix.Name{
+			CommonName: commonName,
+		},
+	}
+	tlsInfo := credentials.TLSInfo{
+		State: tls.ConnectionState{
+			VerifiedChains: [][]*x509.Certificate{{cert}},
+		},
+	}
+	return peer.NewContext(context.Background(), &peer.Peer{
+		Addr:     &mockAddr{},
+		AuthInfo: tlsInfo,
+	})
+}
+
+func newReplicationAuthTestServer(t *testing.T, withMTLS bool, haOpts ...ha.Option) *Server {
+	t.Helper()
+	authMethods := auth.NewMethods()
+	if withMTLS {
+		mtlsMethod := mtls.NewMTLSAuthentication(regexp.MustCompile(`CN=([^,]+)`), mtls.IdentitySourceSubject)
+		require.NoError(t, authMethods.RegisterMethod(auth.MethodMTLS, mtlsMethod))
+	}
+
+	ctrl, err := ha.NewController(context.Background(), haOpts...)
+	require.NoError(t, err)
+
+	return &Server{
+		noauth:      noAuthEndpoints,
+		authMethods: authMethods,
+		ha: &HAComponents{
+			Controller: ctrl,
+		},
+	}
+}
+
+func Test_Server_authenticateReplication(t *testing.T) {
+	unaryMethods := []string{
+		"/replicationapi.Replication/GetSnapshot",
+		"/replicationapi.Replication/Status",
+		"/replicationapi.Replication/ConfirmMissingResources",
+	}
+
+	tests := []struct {
+		name         string
+		withMTLS     bool
+		haOpts       []ha.Option
+		directAllow  *[]string
+		peerCN       string
+		wantCode     codes.Code
+		wantErrMatch string
+	}{
+		{
+			name:         "omitted allowlist denies ordinary agent",
+			withMTLS:     true,
+			haOpts:       []ha.Option{ha.WithEnabled(true), ha.WithPreferredRole("primary")},
+			peerCN:       "ordinary-agent",
+			wantCode:     codes.PermissionDenied,
+			wantErrMatch: "allowed replication clients not configured",
+		},
+		{
+			name:         "explicit empty allowlist denies ordinary agent",
+			withMTLS:     true,
+			haOpts:       []ha.Option{ha.WithEnabled(true), ha.WithPreferredRole("primary"), ha.WithAllowedReplicationClients([]string{})},
+			peerCN:       "ordinary-agent",
+			wantCode:     codes.PermissionDenied,
+			wantErrMatch: "allowed replication clients not configured",
+		},
+		{
+			name:         "whitespace and blank allowlist entries deny ordinary agent",
+			withMTLS:     true,
+			haOpts:       []ha.Option{ha.WithEnabled(true), ha.WithPreferredRole("primary"), ha.WithAllowedReplicationClients([]string{"", "   ", "\t"})},
+			peerCN:       "ordinary-agent",
+			wantCode:     codes.PermissionDenied,
+			wantErrMatch: "allowed replication clients not configured",
+		},
+		{
+			name:         "raw empty string entries in options deny ordinary agent",
+			withMTLS:     true,
+			haOpts:       []ha.Option{ha.WithEnabled(true), ha.WithPreferredRole("primary")},
+			directAllow:  &[]string{""},
+			peerCN:       "ordinary-agent",
+			wantCode:     codes.PermissionDenied,
+			wantErrMatch: "allowed replication clients not configured",
+		},
+		{
+			name:         "ordinary agent denied when allowlist lists only HA peer",
+			withMTLS:     true,
+			haOpts:       []ha.Option{ha.WithEnabled(true), ha.WithPreferredRole("primary"), ha.WithAllowedReplicationClients([]string{"ha-replica"})},
+			peerCN:       "ordinary-agent",
+			wantCode:     codes.PermissionDenied,
+			wantErrMatch: "not in allowed replication clients",
+		},
+		{
+			name:     "explicitly listed HA peer is authorized",
+			withMTLS: true,
+			haOpts:   []ha.Option{ha.WithEnabled(true), ha.WithPreferredRole("primary"), ha.WithAllowedReplicationClients([]string{"ha-replica"})},
+			peerCN:   "ha-replica",
+			wantCode: codes.OK,
+		},
+		{
+			name:         "missing mTLS method returns Unauthenticated even with allowlist",
+			withMTLS:     false,
+			haOpts:       []ha.Option{ha.WithEnabled(true), ha.WithPreferredRole("primary"), ha.WithAllowedReplicationClients([]string{"ha-replica"})},
+			peerCN:       "ha-replica",
+			wantCode:     codes.Unauthenticated,
+			wantErrMatch: "no mtls method configured",
+		},
+		{
+			name:         "missing client certificate returns Unauthenticated",
+			withMTLS:     true,
+			haOpts:       []ha.Option{ha.WithEnabled(true), ha.WithPreferredRole("primary"), ha.WithAllowedReplicationClients([]string{"ha-replica"})},
+			peerCN:       "",
+			wantCode:     codes.Unauthenticated,
+			wantErrMatch: "replication auth failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := newReplicationAuthTestServer(t, tt.withMTLS, tt.haOpts...)
+			if tt.directAllow != nil {
+				srv.ha.Controller.Options().AllowedReplicationClients = *tt.directAllow
+			}
+
+			var ctx context.Context
+			if tt.peerCN != "" {
+				ctx = newMTLSAuthPeerContext(t, tt.peerCN)
+			} else {
+				ctx = context.Background()
+			}
+
+			// Verify unary replication RPCs
+			for _, method := range unaryMethods {
+				handlerCalled := false
+				_, err := srv.unaryAuthInterceptor(ctx, struct{}{}, &grpc.UnaryServerInfo{FullMethod: method}, func(context.Context, any) (any, error) {
+					handlerCalled = true
+					return "ok", nil
+				})
+				if tt.wantCode == codes.OK {
+					require.NoError(t, err, "method %s", method)
+					assert.True(t, handlerCalled, "method %s", method)
+				} else {
+					require.Error(t, err, "method %s", method)
+					assert.False(t, handlerCalled, "method %s", method)
+					assert.Equal(t, tt.wantCode, status.Code(err), "method %s: %v", method, err)
+					assert.Contains(t, err.Error(), tt.wantErrMatch)
+				}
+			}
+
+			// Verify streaming replication RPC
+			streamCalled := false
+			err := srv.streamAuthInterceptor("service", &mockServerStream{ctx: ctx}, &grpc.StreamServerInfo{
+				FullMethod:     "/replicationapi.Replication/Subscribe",
+				IsServerStream: true,
+				IsClientStream: true,
+			}, func(any, grpc.ServerStream) error {
+				streamCalled = true
+				return nil
+			})
+			if tt.wantCode == codes.OK {
+				require.NoError(t, err)
+				assert.True(t, streamCalled)
+			} else {
+				require.Error(t, err)
+				assert.False(t, streamCalled)
+				assert.Equal(t, tt.wantCode, status.Code(err), err.Error())
+				assert.Contains(t, err.Error(), tt.wantErrMatch)
+			}
+		})
+	}
+}
+
+type stubReplicationStateProvider struct{}
+
+func (s *stubReplicationStateProvider) GetAllAgentNames() []string   { return nil }
+func (s *stubReplicationStateProvider) GetAgentMode(string) string   { return "" }
+func (s *stubReplicationStateProvider) IsAgentConnected(string) bool { return false }
+func (s *stubReplicationStateProvider) GetAgentResources(string) []replicationserver.ResourceInfo {
+	return nil
+}
+func (s *stubReplicationStateProvider) GetPrincipalResources() []replicationserver.ResourceInfo {
+	return nil
+}
+func (s *stubReplicationStateProvider) ConfirmMissingResources(string, []replicationserver.ResourceInfo) []replicationserver.MissingResourceConfirmation {
+	return nil
+}
+
+func generateSignedMTLSBundle(t *testing.T, commonName string, ips []net.IP, caCert *x509.Certificate, caKey *ecdsa.PrivateKey) tls.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 62))
+	require.NoError(t, err)
+
+	tmpl := &x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: commonName},
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(1 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+		IPAddresses:           ips,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, &key.PublicKey, caKey)
+	require.NoError(t, err)
+
+	return tls.Certificate{
+		Certificate: [][]byte{der},
+		PrivateKey:  key,
+	}
+}
+
+func Test_Server_ReplicationAllowlist_EndToEndMTLS(t *testing.T) {
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	caTmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(1 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	require.NoError(t, err)
+	caCert, err := x509.ParseCertificate(caDER)
+	require.NoError(t, err)
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(caCert)
+
+	serverTLSCert := generateSignedMTLSBundle(t, "primary-principal", []net.IP{net.ParseIP("127.0.0.1")}, caCert, caKey)
+	agentTLSCert := generateSignedMTLSBundle(t, "ordinary-agent", nil, caCert, caKey)
+	peerTLSCert := generateSignedMTLSBundle(t, "ha-replica", nil, caCert, caKey)
+
+	startMTLSReplicationServer := func(t *testing.T, haOpts ...ha.Option) (string, *replicationserver.Server) {
+		t.Helper()
+		srv := newReplicationAuthTestServer(t, true, haOpts...)
+		replSrv := replicationserver.NewServer(replication.NewForwarder(), &stubReplicationStateProvider{})
+		srv.ha.ReplicationServer = replSrv
+
+		serverTLS := &tls.Config{
+			Certificates: []tls.Certificate{serverTLSCert},
+			ClientCAs:    caPool,
+			ClientAuth:   tls.RequireAndVerifyClientCert,
+			MinVersion:   tls.VersionTLS12,
+		}
+		grpcSrv := grpc.NewServer(
+			grpc.Creds(credentials.NewTLS(serverTLS)),
+			grpc.ChainUnaryInterceptor(srv.unaryAuthInterceptor),
+			grpc.ChainStreamInterceptor(srv.streamAuthInterceptor),
+		)
+		replicationapi.RegisterReplicationServer(grpcSrv, replSrv)
+
+		lis, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			grpcSrv.Stop()
+		})
+		go func() {
+			_ = grpcSrv.Serve(lis)
+		}()
+		return lis.Addr().String(), replSrv
+	}
+
+	dialClient := func(t *testing.T, addr string, clientCert tls.Certificate) replicationapi.ReplicationClient {
+		t.Helper()
+		clientTLS := &tls.Config{
+			Certificates: []tls.Certificate{clientCert},
+			RootCAs:      caPool,
+			MinVersion:   tls.VersionTLS12,
+		}
+		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)))
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = conn.Close()
+		})
+		return replicationapi.NewReplicationClient(conn)
+	}
+
+	t.Run("omitted allowlist denies unary and streaming replication over mTLS", func(t *testing.T) {
+		addr, replSrv := startMTLSReplicationServer(t, ha.WithEnabled(true), ha.WithPreferredRole("primary"))
+		agentClient := dialClient(t, addr, agentTLSCert)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := agentClient.Status(ctx, &replicationapi.StatusRequest{})
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+
+		_, err = agentClient.GetSnapshot(ctx, &replicationapi.SnapshotRequest{})
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+
+		_, err = agentClient.ConfirmMissingResources(ctx, &replicationapi.ConfirmMissingResourcesRequest{AgentName: "ordinary-agent"})
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+
+		stream, err := agentClient.Subscribe(ctx)
+		if err == nil {
+			_, err = stream.Recv()
+		}
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+		assert.Equal(t, 0, replSrv.ConnectedReplicaCount())
+	})
+
+	t.Run("explicit allowlist rejects ordinary agent and allows listed HA peer", func(t *testing.T) {
+		addr, replSrv := startMTLSReplicationServer(t,
+			ha.WithEnabled(true),
+			ha.WithPreferredRole("primary"),
+			ha.WithAllowedReplicationClients([]string{"ha-replica"}),
+		)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		agentClient := dialClient(t, addr, agentTLSCert)
+		_, err := agentClient.GetSnapshot(ctx, &replicationapi.SnapshotRequest{})
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+
+		agentStream, err := agentClient.Subscribe(ctx)
+		if err == nil {
+			_, err = agentStream.Recv()
+		}
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
+
+		peerClient := dialClient(t, addr, peerTLSCert)
+		st, err := peerClient.Status(ctx, &replicationapi.StatusRequest{})
+		require.NoError(t, err)
+		assert.Equal(t, uint64(0), st.CurrentSequenceNum)
+
+		snap, err := peerClient.GetSnapshot(ctx, &replicationapi.SnapshotRequest{})
+		require.NoError(t, err)
+		require.NotNil(t, snap)
+
+		confirmResp, err := peerClient.ConfirmMissingResources(ctx, &replicationapi.ConfirmMissingResourcesRequest{AgentName: "ordinary-agent"})
+		require.NoError(t, err)
+		require.NotNil(t, confirmResp)
+
+		peerStream, err := peerClient.Subscribe(ctx)
+		require.NoError(t, err)
+		require.NoError(t, peerStream.Send(&replicationapi.ReplicationAck{AckedSequenceNum: snap.LastSequenceNum}))
+
+		require.Eventually(t, func() bool {
+			return replSrv.ConnectedReplicaCount() == 1
+		}, 2*time.Second, 20*time.Millisecond)
+
+		require.NoError(t, peerStream.CloseSend())
+		_, recvErr := peerStream.Recv()
+		assert.True(t, recvErr == nil || recvErr == io.EOF || status.Code(recvErr) == codes.Canceled || status.Code(recvErr) == codes.DeadlineExceeded)
+	})
 }
