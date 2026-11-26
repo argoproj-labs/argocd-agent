@@ -2848,6 +2848,52 @@ func TestServer_syncGPGKeyToManagedAgents(t *testing.T) {
 
 		assert.Equal(t, 1, len(s.resources.GetAllResources("agent1")))
 	})
+
+	t.Run("is serialized against sendCurrentStateToAgent's GPG key check-then-enqueue", func(t *testing.T) {
+		s := &Server{
+			ctx:    context.Background(),
+			queues: queue.NewSendRecvQueues(),
+			events: event.NewEventSource("test"),
+			namespaceMap: map[string]types.AgentMode{
+				"agent1": types.AgentModeManaged,
+			},
+			resources: resources.NewAgentResources(),
+		}
+		s.queues.Create("agent1")
+
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "argocd-gpg-keys-cm",
+				Namespace: "argocd",
+			},
+		}
+
+		// Simulate sendCurrentStateToAgent has read the GPG key ConfigMap's state but has not yet enqueued an event.
+		s.gpgKeySyncLock.Lock()
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			logCtx := logrus.WithField("test", "syncGPGKeyToManagedAgents")
+			s.syncGPGKeyToManagedAgents(context.Background(), cm, event.Create, logCtx)
+		}()
+
+		select {
+		case <-done:
+			t.Fatal("syncGPGKeyToManagedAgents returned without waiting for gpgKeySyncLock")
+		case <-time.After(200 * time.Millisecond):
+		}
+		assert.Equal(t, 0, s.queues.SendQ("agent1").Len())
+
+		s.gpgKeySyncLock.Unlock()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("syncGPGKeyToManagedAgents did not proceed after gpgKeySyncLock was released")
+		}
+		assert.Equal(t, 1, s.queues.SendQ("agent1").Len())
+	})
 }
 
 func TestServer_deleteGPGKeyCallback(t *testing.T) {

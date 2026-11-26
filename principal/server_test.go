@@ -324,9 +324,14 @@ func Test_handleResyncOnConnect(t *testing.T) {
 		assert.Nil(t, err)
 
 		sendQ := s.queues.SendQ(agent.Name())
-		assert.Equal(t, 1, sendQ.Len())
+		assert.Equal(t, 2, sendQ.Len())
 
 		ev, shutdown := sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.Delete.String(), ev.Type())
+		assert.Equal(t, targets.GPGKey.String(), ev.DataSchema())
+
+		ev, shutdown = sendQ.Get()
 		assert.False(t, shutdown)
 		assert.Equal(t, event.EventRequestResourceResync.String(), ev.Type())
 	})
@@ -452,7 +457,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
-		assert.Equal(t, 1, sendQ.Len())
+		assert.Equal(t, 2, sendQ.Len())
 
 		ev, shutdown := sendQ.Get()
 		assert.False(t, shutdown)
@@ -481,7 +486,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
-		assert.Equal(t, 0, sendQ.Len())
+		assert.Equal(t, 1, sendQ.Len())
 	})
 
 	t.Run("skips project with SourceUIDAnnotation", func(t *testing.T) {
@@ -498,7 +503,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
-		assert.Equal(t, 0, sendQ.Len())
+		assert.Equal(t, 1, sendQ.Len())
 	})
 
 	t.Run("skips project with SkipSyncLabel=true", func(t *testing.T) {
@@ -515,7 +520,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
-		assert.Equal(t, 0, sendQ.Len())
+		assert.Equal(t, 1, sendQ.Len())
 	})
 
 	t.Run("does not skip project with SkipSyncLabel=false", func(t *testing.T) {
@@ -532,7 +537,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
-		assert.Equal(t, 1, sendQ.Len())
+		assert.Equal(t, 2, sendQ.Len())
 	})
 
 	t.Run("sends repository for matching project and updates mappings", func(t *testing.T) {
@@ -555,9 +560,9 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
-		// 1 project event + 1 repository event
+		// 1 project event + 1 repository event + 1 GPG key delete event (ConfigMap does not exist in this test)
 		sendQ := s.queues.SendQ(agentName)
-		assert.Equal(t, 2, sendQ.Len())
+		assert.Equal(t, 3, sendQ.Len())
 
 		assert.True(t, s.projectToRepos.Get("proj1")["repo1"])
 		assert.True(t, s.repoToAgents.Get("repo1")[agentName])
@@ -594,9 +599,9 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
-		// 1 project event + 1 repo-creds event
+		// 1 project event + 1 repo-creds event + 1 GPG key delete event (ConfigMap does not exist in this test)
 		sendQ := s.queues.SendQ(agentName)
-		assert.Equal(t, 2, sendQ.Len())
+		assert.Equal(t, 3, sendQ.Len())
 
 		assert.True(t, s.projectToRepos.Get("proj1")["creds1"])
 		assert.True(t, s.repoToAgents.Get("creds1")[agentName])
@@ -622,9 +627,9 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
 		require.NoError(t, err)
 
-		// Only 1 project event, no repository event
+		// 1 project event + 1 GPG key delete event, no repository event
 		sendQ := s.queues.SendQ(agentName)
-		assert.Equal(t, 1, sendQ.Len())
+		assert.Equal(t, 2, sendQ.Len())
 	})
 
 	t.Run("sends projects and repos for wildcard destination match", func(t *testing.T) {
@@ -656,7 +661,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
-		assert.Equal(t, 2, sendQ.Len())
+		assert.Equal(t, 3, sendQ.Len())
 	})
 
 	t.Run("skips repository when it has SkipSyncLabel=true", func(t *testing.T) {
@@ -681,7 +686,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
-		assert.Equal(t, 1, sendQ.Len())
+		assert.Equal(t, 2, sendQ.Len())
 		assert.Empty(t, s.repoToAgents.Get("repo1"))
 	})
 
@@ -707,7 +712,7 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		require.NoError(t, err)
 
 		sendQ := s.queues.SendQ(agentName)
-		assert.Equal(t, 0, sendQ.Len())
+		assert.Equal(t, 1, sendQ.Len())
 		assert.Empty(t, s.projectToRepos.Get("proj1"))
 		assert.Empty(t, s.repoToAgents.Get("repo1"))
 	})
@@ -783,6 +788,30 @@ func Test_SendCurrentStateToAgent(t *testing.T) {
 		// 1 project + 1 repo, GPG key skipped
 		sendQ := s.queues.SendQ(agentName)
 		assert.Equal(t, 2, sendQ.Len())
+	})
+
+	t.Run("sends GPG key delete event when ConfigMap was deleted before agent connected", func(t *testing.T) {
+		mockProjBackend := &mocks.AppProject{}
+		mockRepoBackend := &mocks.Repository{}
+		mockProjBackend.On("List", mock.Anything, mock.Anything).Return([]v1alpha1.AppProject{}, nil)
+		mockRepoBackend.On("List", mock.Anything, mock.Anything).Return([]corev1.Secret{}, nil)
+
+		mockGPGBackend := mocks.NewGPGKey(t)
+		mockGPGBackend.On("Get", mock.Anything, common.ArgoCDGPGKeysConfigMapName, ns).
+			Return(nil, k8serrors.NewNotFound(schema.GroupResource{Group: "", Resource: "configmaps"}, common.ArgoCDGPGKeysConfigMapName))
+
+		s := newServer(t, mockProjBackend, mockRepoBackend)
+		s.gpgKeyManager = gpgkey.NewManager(mockGPGBackend, ns)
+		err := s.sendCurrentStateToAgent(types.NewAgent(agentName, types.AgentModeManaged.String()))
+		require.NoError(t, err)
+
+		sendQ := s.queues.SendQ(agentName)
+		require.Equal(t, 1, sendQ.Len())
+
+		ev, shutdown := sendQ.Get()
+		assert.False(t, shutdown)
+		assert.Equal(t, event.Delete.String(), ev.Type())
+		assert.Equal(t, targets.GPGKey.String(), ev.DataSchema())
 	})
 }
 
