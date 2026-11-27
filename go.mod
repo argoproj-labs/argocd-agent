@@ -5,8 +5,8 @@ go 1.27.3
 require (
 	github.com/Shopify/toxiproxy/v2 v2.13.0
 	github.com/alicebob/miniredis/v2 v2.40.0
-	github.com/argoproj/argo-cd/gitops-engine/v3 v3.6.2
-	github.com/argoproj/argo-cd/v3 v3.6.2
+	github.com/argoproj/argo-cd/gitops-engine/v3 v3.6.3
+	github.com/argoproj/argo-cd/v3 v3.6.3
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.16.2
 	github.com/cloudevents/sdk-go/v2 v2.16.2
@@ -131,7 +131,7 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
-	github.com/klauspost/compress v1.20.1 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
