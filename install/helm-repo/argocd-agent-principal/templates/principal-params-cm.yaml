@@ -138,6 +138,7 @@ data:
   principal.websocket.enable: {{ .Values.principal.websocket.enable | quote }}
   principal.redis.compression.type: {{ .Values.principal.redis.compressionType | quote }}
   principal.resource-proxy.enable: {{ .Values.principal.resourceProxy.enabled | quote }}
+  principal.redis-proxy.disable: {{ not .Values.principal.redisProxy.enabled | quote }}
   principal.keep-alive.min-interval: {{ .Values.principal.keepAlive.minInterval | quote }}
   # principal.pprof.port: Port for the pprof server, bound to localhost. 0
   # starts no listener at all, which also makes principal.pprof.enabled inert.

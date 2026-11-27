@@ -635,6 +635,18 @@ Number of concurrent event processors. Increasing this value allows the principa
 
 ## Redis Configuration
 
+### Disable Redis Proxy
+
+| | |
+|---|---|
+| **CLI Flag** | `--disable-redis-proxy` |
+| **Environment Variable** | `ARGOCD_PRINCIPAL_DISABLE_REDIS_PROXY` |
+| **ConfigMap Entry** | `principal.redis-proxy.disable` |
+| **Type** | Boolean |
+| **Default** | `false` |
+
+Whether to disable the Redis proxy. When disabled, the principal does not listen on port 6379.
+
 ### Redis Server Address
 
 | | |
