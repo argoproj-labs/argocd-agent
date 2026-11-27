@@ -21,5 +21,7 @@ exec "$SCRIPT_DIR/argocd-agent" principal \
     --ha-enabled \
     --ha-preferred-role replica \
     --ha-peer-address "localhost:8443" \
+    --ha-peer-tls-cert "$SCRIPT_DIR/certs/peer.crt" \
+    --ha-peer-tls-key "$SCRIPT_DIR/certs/peer.key" \
     --ha-admin-port 8406 \
     --ha-failover-timeout 10s

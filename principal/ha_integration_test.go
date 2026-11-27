@@ -21,10 +21,12 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"testing"
 	"time"
@@ -46,6 +48,7 @@ import (
 	eventstreamMock "github.com/argoproj-labs/argocd-agent/principal/apis/eventstream/mock"
 	replicationserver "github.com/argoproj-labs/argocd-agent/principal/apis/replication"
 	fakekube "github.com/argoproj-labs/argocd-agent/test/fake/kube"
+	"github.com/argoproj-labs/argocd-agent/test/fake/testcerts"
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	cacheutil "github.com/argoproj/argo-cd/v3/util/cache"
@@ -103,6 +106,7 @@ func TestNewHAComponents(t *testing.T) {
 	t.Run("creates with HA options", func(t *testing.T) {
 		ctx := context.Background()
 		server := createTestServer()
+		server.options = &ServerOptions{insecurePlaintext: true}
 
 		components, err := NewHAComponents(ctx, server,
 			ha.WithEnabled(true), ha.WithPreferredRole("primary"),
@@ -141,10 +145,20 @@ func TestNewHAComponents(t *testing.T) {
 		server := createTestServer()
 		server.options = nil
 
+		certBase := filepath.Join(t.TempDir(), "peer")
+		testcerts.WriteSelfSignedCert(t, "rsa", certBase, x509.Certificate{
+			SerialNumber: big.NewInt(1),
+			Subject:      pkix.Name{CommonName: "argocd-agent-principal-peer"},
+			NotBefore:    time.Now().Add(-1 * time.Hour),
+			NotAfter:     time.Now().Add(1 * time.Hour),
+			ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		})
+
 		components, err := NewHAComponents(ctx, server,
 			ha.WithEnabled(true),
 			ha.WithPreferredRole("replica"),
 			ha.WithPeerAddress("localhost:0"),
+			ha.WithPeerClientTLS(certBase+".crt", certBase+".key"),
 		)
 		require.NoError(t, err)
 		require.NotNil(t, components.ReplicationClient)
@@ -194,10 +208,22 @@ func TestNewHAComponents(t *testing.T) {
 		server.options = defaultOptions()
 		require.NoError(t, WithGeneratedTLS("argocd-agent-principal--generated")(server))
 
+		// The replica authenticates to its peer with a dedicated client
+		// certificate, kept separate from the server certificate.
+		certBase := filepath.Join(t.TempDir(), "peer")
+		testcerts.WriteSelfSignedCert(t, "rsa", certBase, x509.Certificate{
+			SerialNumber: big.NewInt(1),
+			Subject:      pkix.Name{CommonName: "argocd-agent-principal-peer"},
+			NotBefore:    time.Now().Add(-1 * time.Hour),
+			NotAfter:     time.Now().Add(1 * time.Hour),
+			ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		})
+
 		components, err := NewHAComponents(ctx, server,
 			ha.WithEnabled(true),
 			ha.WithPreferredRole("replica"),
 			ha.WithPeerAddress("localhost:0"),
+			ha.WithPeerClientTLS(certBase+".crt", certBase+".key"),
 		)
 		require.NoError(t, err)
 		require.NotNil(t, components.ReplicationClient)
@@ -205,6 +231,35 @@ func TestNewHAComponents(t *testing.T) {
 		err = components.ReplicationClient.Connect(ctx)
 		require.NoError(t, err)
 		require.NoError(t, components.ReplicationClient.Disconnect())
+	})
+
+	t.Run("fails fast without a dedicated peer certificate when TLS is enabled", func(t *testing.T) {
+		ctx := context.Background()
+		server := createTestServer()
+		server.options = defaultOptions()
+		require.NoError(t, WithGeneratedTLS("argocd-agent-principal--generated")(server))
+
+		_, err := NewHAComponents(ctx, server,
+			ha.WithEnabled(true),
+			ha.WithPreferredRole("replica"),
+			ha.WithPeerAddress("localhost:0"),
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--ha-peer-tls-cert")
+	})
+
+	t.Run("fails fast without peer certificate for preferred primary with peer address", func(t *testing.T) {
+		ctx := context.Background()
+		server := createTestServer()
+		server.options = defaultOptions()
+
+		_, err := NewHAComponents(ctx, server,
+			ha.WithEnabled(true),
+			ha.WithPreferredRole("primary"),
+			ha.WithPeerAddress("peer.example.com:8443"),
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--ha-peer-tls-cert")
 	})
 }
 
@@ -489,6 +544,7 @@ func TestGetHAStatus(t *testing.T) {
 	t.Run("returns full status when enabled", func(t *testing.T) {
 		ctx := context.Background()
 		server := createTestServer()
+		server.options = &ServerOptions{insecurePlaintext: true}
 
 		components, err := NewHAComponents(ctx, server,
 			ha.WithEnabled(true), ha.WithPreferredRole("primary"),
@@ -788,6 +844,7 @@ func TestForwardEventForReplication(t *testing.T) {
 	t.Run("does not forward when not active", func(t *testing.T) {
 		ctx := context.Background()
 		server := createTestServer()
+		server.options = &ServerOptions{insecurePlaintext: true}
 
 		components, err := NewHAComponents(ctx, server,
 			ha.WithEnabled(true), ha.WithPreferredRole("replica"),
