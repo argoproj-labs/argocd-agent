@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/Shopify/toxiproxy/v2 v2.13.0
 	github.com/alicebob/miniredis/v2 v2.40.0
-	github.com/argoproj/argo-cd/gitops-engine/v3 v3.6.2
+	github.com/argoproj/argo-cd/gitops-engine/v3 v3.6.3
 	github.com/argoproj/argo-cd/v3 v3.6.2
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/cloudevents/sdk-go/binding/format/protobuf/v2 v2.16.2
