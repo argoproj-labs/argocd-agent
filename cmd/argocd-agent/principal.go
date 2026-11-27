@@ -780,8 +780,8 @@ func NewPrincipalRunCommand() *cobra.Command {
 		"INSECURE: Do not verify Redis TLS certificate")
 
 	command.Flags().BoolVar(&destinationBasedMapping, "destination-based-mapping",
-		env.BoolWithDefault("ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING", false),
-		"Map applications to agents based on spec.destination.name instead of namespace")
+		env.BoolWithDefault("ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING", true),
+		"Map applications to agents based on spec.destination.name instead of namespace. Set to false for the deprecated namespace-based mapping")
 
 	command.Flags().StringVar(&labelSelector, "label-selector",
 		env.StringWithDefault("ARGOCD_PRINCIPAL_LABEL_SELECTOR", nil, ""),

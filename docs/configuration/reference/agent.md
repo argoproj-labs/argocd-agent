@@ -68,18 +68,19 @@ Namespace to manage applications in.
 | **Environment Variable** | `ARGOCD_AGENT_DESTINATION_BASED_MAPPING` |
 | **ConfigMap Entry** | `agent.destination-based-mapping` |
 | **Type** | Boolean |
-| **Default** | `false` |
+| **Default** | `true` for managed agents, `false` for autonomous agents (since v1.0.0) |
 
 Enable destination-based mapping mode. When enabled, the agent creates Applications in their original namespace (preserving the namespace from the principal) instead of the agent's configured namespace. The agent also watches for Applications in all allowed namespaces rather than only its own namespace.
 
-Both the principal and agent must have this flag enabled for destination-based mapping to work correctly.
+The principal and the agent must use the same mapping mode. Both default to destination-based mapping since v1.0.0 (managed agents only; autonomous agents do not support it). To keep the deprecated namespace-based mapping, set this flag to `false` on the principal and on every managed agent.
 
 See [Agent Mapping Modes](../../user-guide/managed-agent/agent-mapping.md) for a detailed comparison of namespace-based and destination-based mapping.
 
 **Example:**
 
 ```bash
-argocd-agent agent --destination-based-mapping
+# Keep the deprecated namespace-based mapping
+argocd-agent agent --destination-based-mapping=false
 ```
 
 ### Create Namespace
@@ -99,7 +100,7 @@ Without this flag, Applications targeting non-existent namespaces will fail to b
 **Example:**
 
 ```bash
-argocd-agent agent --destination-based-mapping --create-namespace
+argocd-agent agent --create-namespace
 ```
 
 ### Allowed Namespaces

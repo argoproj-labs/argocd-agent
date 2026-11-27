@@ -127,3 +127,37 @@ func Test_redisCreds(t *testing.T) {
 		})
 	}
 }
+
+func Test_resolveDestinationBasedMapping(t *testing.T) {
+	const key = "ARGOCD_AGENT_DESTINATION_BASED_MAPPING"
+	if v, ok := os.LookupEnv(key); ok {
+		t.Cleanup(func() { _ = os.Setenv(key, v) })
+		require.NoError(t, os.Unsetenv(key))
+	}
+	t.Run("default follows the agent mode", func(t *testing.T) {
+		assert.True(t, resolveDestinationBasedMapping(false, "managed", false))
+		assert.False(t, resolveDestinationBasedMapping(false, "autonomous", false))
+		assert.False(t, resolveDestinationBasedMapping(false, "unknown", false))
+	})
+	t.Run("unparsable environment falls back to the mode default", func(t *testing.T) {
+		t.Setenv(key, "yes")
+		assert.True(t, resolveDestinationBasedMapping(false, "managed", false))
+		assert.False(t, resolveDestinationBasedMapping(false, "autonomous", false))
+	})
+	t.Run("flag wins", func(t *testing.T) {
+		assert.False(t, resolveDestinationBasedMapping(true, "managed", false))
+		assert.True(t, resolveDestinationBasedMapping(true, "autonomous", true))
+	})
+	t.Run("flag wins over a conflicting environment", func(t *testing.T) {
+		t.Setenv(key, "true")
+		assert.False(t, resolveDestinationBasedMapping(true, "managed", false))
+		t.Setenv(key, "false")
+		assert.True(t, resolveDestinationBasedMapping(true, "autonomous", true))
+	})
+	t.Run("environment wins", func(t *testing.T) {
+		t.Setenv(key, "false")
+		assert.False(t, resolveDestinationBasedMapping(false, "managed", false))
+		t.Setenv(key, "true")
+		assert.True(t, resolveDestinationBasedMapping(false, "autonomous", true))
+	})
+}

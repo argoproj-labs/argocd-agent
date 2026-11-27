@@ -119,7 +119,7 @@ This command:
 Create the required namespace for the agent on the principal cluster:
 
 ```bash
-# Create namespace for managed agents (namespace-based mapping)
+# Create namespace for managed agents (namespace-based mapping only, deprecated)
 kubectl create namespace <agent-name> --context <control-plane-context>
 
 # For autonomous agents, the namespace is typically created automatically
@@ -204,7 +204,7 @@ data:
 
 ### Destination-Based Mapping Configuration
 
-If you are using destination-based mapping instead of the default namespace-based mapping, add the following to the agent's ConfigMap:
+Destination-based mapping is the default for managed agents since v1.0.0. The entries below are only needed to tune it, or to turn it off with `"false"` for the deprecated namespace-based mapping:
 
 ```yaml
 apiVersion: v1
@@ -222,7 +222,7 @@ data:
 ```
 
 !!! important "Both Sides Must Match"
-    Destination-based mapping must be enabled on **both** the principal and agent. Ensure the principal also has `--destination-based-mapping` set. See the [Configuration Reference](../configuration/reference/principal.md#destination-based-mapping) for principal-side configuration.
+    The principal and the agent must use the same mapping mode. Both default to destination-based mapping since v1.0.0; if you pinned `--destination-based-mapping=false` on one side, pin it on the other as well. See the [Configuration Reference](../configuration/reference/principal.md#destination-based-mapping) for principal-side configuration.
 
 ### Authentication Methods
 

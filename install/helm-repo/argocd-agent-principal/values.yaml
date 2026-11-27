@@ -343,8 +343,8 @@ principal:
   # -- Address of the resource proxy as seen by ArgoCD's application controller.
   resourceProxyAddress: "argocd-agent-resource-proxy:9090"
 
-  # -- Enable destination-based mapping (deploys apps into their declared namespace instead of the agent namespace).
-  destinationBasedMapping: false
+  # -- Enable destination-based mapping (deploys apps into their declared namespace instead of the agent namespace). Set to false for the deprecated namespace-based mapping.
+  destinationBasedMapping: true
   # -- Kubernetes label selector to restrict which resources the principal watches.
   labelSelector: ""
   # -- Number of concurrent event processors.

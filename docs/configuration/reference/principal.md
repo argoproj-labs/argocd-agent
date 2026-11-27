@@ -107,18 +107,19 @@ Labels to apply to auto-created namespaces.
 | **Environment Variable** | `ARGOCD_PRINCIPAL_DESTINATION_BASED_MAPPING` |
 | **ConfigMap Entry** | `principal.destination-based-mapping` |
 | **Type** | Boolean |
-| **Default** | `false` |
+| **Default** | `true` (since v1.0.0) |
 
 Enable destination-based mapping mode. When enabled, the principal routes Applications to agents based on `spec.destination.name` instead of the Application's namespace. This allows applications from multiple namespaces to be synced to the same agent.
 
-Both the principal and agent must have this flag enabled for destination-based mapping to work correctly.
+The principal and the agent must use the same mapping mode. Both default to destination-based mapping since v1.0.0. To keep the deprecated namespace-based mapping, set this flag to `false` on the principal and on every managed agent.
 
 See [Agent Mapping Modes](../../user-guide/managed-agent/agent-mapping.md) for a detailed comparison of namespace-based and destination-based mapping.
 
 **Example:**
 
 ```bash
-argocd-agent principal --destination-based-mapping
+# Keep the deprecated namespace-based mapping
+argocd-agent principal --destination-based-mapping=false
 ```
 
 ## Resource Filtering

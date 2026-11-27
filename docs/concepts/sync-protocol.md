@@ -175,7 +175,7 @@ In managed mode, the **principal is the source of truth** for configuration:
 
 **Namespace Mapping:**
 
-- **Namespace-based (default):** Applications on principal are placed in namespaces named after target agents. Example: Applications in namespace `production-cluster` sync to agent `production-cluster`.
+- **Namespace-based (deprecated, the default before v1.0.0):** Applications on principal are placed in namespaces named after target agents. Example: Applications in namespace `production-cluster` sync to agent `production-cluster`.
 - **Destination-based:** Applications use `spec.destination.name` on the principal to specify the target agent, allowing multiple namespaces per agent. Example: An application with `destination.name: production-cluster` syncs to agent `production-cluster` regardless of its namespace.
 
 See [Agent Mapping Modes](../user-guide/managed-agent/agent-mapping.md) for detailed configuration.

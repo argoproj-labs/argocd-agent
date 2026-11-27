@@ -91,7 +91,7 @@ For each workload cluster, decide on the operational mode:
 
 For managed agents, decide on the mapping mode:
 
-**Namespace-Based Mapping** (default) - Choose when:
+**Namespace-Based Mapping** (deprecated, the default before v1.0.0) - Choose when:
 
 - You have a simple one-agent-per-namespace setup
 - Backward compatibility with existing argocd-agent deployments is required

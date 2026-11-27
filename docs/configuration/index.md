@@ -109,7 +109,7 @@ This section is organized by task to help you find what you need:
 | [Reference: Agent](reference/agent.md) | Complete agent parameter reference |
 
 !!! tip "Mapping Mode Configuration"
-    argocd-agent supports two mapping modes: **namespace-based** (default) and **destination-based**. If you plan to use destination-based mapping, both principal and agent must have `--destination-based-mapping` enabled. See [Agent Mapping Modes](../user-guide/managed-agent/agent-mapping.md) for a conceptual overview, or the [Principal](reference/principal.md#destination-based-mapping) and [Agent](reference/agent.md#destination-based-mapping) reference pages for configuration details.
+    argocd-agent supports two mapping modes: **destination-based** (the default since v1.0.0) and **namespace-based** (deprecated). Principal and agent must use the same mode; to keep namespace-based mapping, set `--destination-based-mapping=false` on both. See [Agent Mapping Modes](../user-guide/managed-agent/agent-mapping.md) for a conceptual overview, or the [Principal](reference/principal.md#destination-based-mapping) and [Agent](reference/agent.md#destination-based-mapping) reference pages for configuration details.
 
 ## Quick Start
 

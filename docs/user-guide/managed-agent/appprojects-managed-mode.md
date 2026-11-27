@@ -27,7 +27,7 @@ In managed mode, AppProjects must be created on the **principal cluster** (contr
 The principal distributes an AppProject to a managed agent based on the active mapping mode.
 Glob pattern matching is used throughout, so wildcards like `agent-*` are supported.
 
-**Namespace-based mapping** (default): the agent name must match **both**:
+**Namespace-based mapping** (deprecated, the default before v1.0.0): the agent name must match **both**:
 
 1. A pattern in `.spec.destinations[].name` (or via server URL `?agentName=` param)
 2. A pattern in `.spec.sourceNamespaces`

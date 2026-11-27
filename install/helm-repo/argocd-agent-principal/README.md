@@ -1,6 +1,6 @@
 # argocd-agent-principal
 
-![Version: 0.3.8](https://img.shields.io/badge/Version-0.3.8-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.10.0](https://img.shields.io/badge/AppVersion-v0.10.0-informational?style=flat-square)
+![Version: 0.4.0](https://img.shields.io/badge/Version-0.4.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.10.0](https://img.shields.io/badge/AppVersion-v0.10.0-informational?style=flat-square)
 
 Argo CD Agent Principal component for multi-cluster application management
 
@@ -62,7 +62,7 @@ Kubernetes: `>=1.24.0-0`
 | principal.additionalArgs | list | `[]` | Extra CLI arguments to pass to the principal binary. |
 | principal.allowedNamespaces | string | `""` | Comma-separated list of additional namespaces the principal watches. Supports glob patterns. |
 | principal.auth | string | `"mtls:CN=([^,]+)"` | Authentication method. Formats: "mtls:CN=([^,]+)", "userpass:/path/to/creds", "spiffe-jwt:spiffe://...". |
-| principal.destinationBasedMapping | bool | `false` | Enable destination-based mapping (deploys apps into their declared namespace instead of the agent namespace). |
+| principal.destinationBasedMapping | bool | `true` | Enable destination-based mapping (deploys apps into their declared namespace instead of the agent namespace). Set to false for the deprecated namespace-based mapping. |
 | principal.eventProcessors | string | `"10"` | Number of concurrent event processors. |
 | principal.healthz.port | int | `8003` | Health check server port. |
 | principal.jwt.allowGenerate | bool | `false` | Allow the principal to generate its own JWT signing key on startup. INSECURE — development only. |
