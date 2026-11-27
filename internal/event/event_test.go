@@ -793,7 +793,7 @@ func TestEventSource_resourceRequestAndResponse(t *testing.T) {
 		gvr := metav1.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
 		params := map[string]string{"watch": "true"}
 
-		cev, err := evs.NewResourceRequestEvent(gvr, "argocd", "app", "status", http.MethodPatch, []byte(`{"a":1}`), params)
+		cev, err := evs.NewResourceRequestEvent(gvr, "argocd", "app", "status", http.MethodPatch, []byte(`{"a":1}`), params, "")
 		require.NoError(t, err)
 
 		require.Equal(t, http.MethodPatch, cev.Type())
@@ -1128,7 +1128,7 @@ func TestEventSource_NewLogRequestEvent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cev, err := evs.NewLogRequestEvent("ns", "pod", http.MethodGet, tt.params)
+			cev, err := evs.NewLogRequestEvent("ns", "pod", http.MethodGet, tt.params, "")
 			require.NoError(t, err)
 
 			require.Equal(t, http.MethodGet, cev.Type())
@@ -1181,5 +1181,58 @@ func TestResourceIDAndEventID(t *testing.T) {
 		ev.SetExtension(eventID, "evt-1")
 		require.Equal(t, "res-1", ResourceID(&ev))
 		require.Equal(t, "evt-1", EventID(&ev))
+	})
+}
+
+func TestNewResourceRequestEvent_Impersonate(t *testing.T) {
+	gvr := metav1.GroupVersionResource{Version: "v1", Resource: "pods"}
+	source := NewEventSource("principal")
+
+	t.Run("the impersonated user survives the round trip through the event", func(t *testing.T) {
+		const user = "system:serviceaccount:tenant-a:deployer"
+		cev, err := source.NewResourceRequestEvent(gvr, "tenant-a", "pod-1", "", "GET", nil, nil, user)
+		require.NoError(t, err)
+
+		rreq, err := New(cev, targets.Resource).ResourceRequest()
+		require.NoError(t, err)
+		require.Equal(t, user, rreq.Impersonate)
+		require.Equal(t, "pod-1", rreq.Name)
+		require.Equal(t, "tenant-a", rreq.Namespace)
+	})
+
+	t.Run("no impersonation leaves the field out of the payload", func(t *testing.T) {
+		cev, err := source.NewResourceRequestEvent(gvr, "tenant-a", "pod-1", "", "GET", nil, nil, "")
+		require.NoError(t, err)
+
+		rreq, err := New(cev, targets.Resource).ResourceRequest()
+		require.NoError(t, err)
+		require.Empty(t, rreq.Impersonate)
+		require.NotContains(t, string(cev.Data()), "impersonate")
+	})
+}
+
+func TestNewLogRequestEvent_Impersonate(t *testing.T) {
+	source := NewEventSource("principal")
+
+	t.Run("the impersonated user survives the round trip through the event", func(t *testing.T) {
+		const user = "system:serviceaccount:tenant-a:deployer"
+		cev, err := source.NewLogRequestEvent("tenant-a", "pod-1", "GET", map[string]string{"container": "app"}, user)
+		require.NoError(t, err)
+
+		logReq, err := New(cev, targets.ContainerLog).ContainerLogRequest()
+		require.NoError(t, err)
+		require.Equal(t, user, logReq.Impersonate)
+		require.Equal(t, "pod-1", logReq.PodName)
+		require.Equal(t, "app", logReq.Container)
+	})
+
+	t.Run("no impersonation leaves the field out of the payload", func(t *testing.T) {
+		cev, err := source.NewLogRequestEvent("tenant-a", "pod-1", "GET", nil, "")
+		require.NoError(t, err)
+
+		logReq, err := New(cev, targets.ContainerLog).ContainerLogRequest()
+		require.NoError(t, err)
+		require.Empty(t, logReq.Impersonate)
+		require.NotContains(t, string(cev.Data()), "impersonate")
 	})
 }

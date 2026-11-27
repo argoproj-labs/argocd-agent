@@ -200,6 +200,12 @@ spec:
                 name: argocd-agent-params
                 key: agent.resource-proxy.enable
                 optional: true
+          - name: ARGOCD_AGENT_ENABLE_RESOURCE_PROXY_IMPERSONATION
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: agent.resource-proxy.impersonation.enabled
+                optional: true
           - name: ARGOCD_AGENT_DESTINATION_BASED_MAPPING
             valueFrom:
               configMapKeyRef:

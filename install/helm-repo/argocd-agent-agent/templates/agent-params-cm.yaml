@@ -113,6 +113,10 @@ data:
   # agent.resource-proxy.enabled: Whether to enable resource proxy.
   # Default: true
   agent.resource-proxy.enabled: {{ .Values.enableResourceProxy | quote }}
+  # agent.resource-proxy.impersonation.enabled: Whether the resource proxy
+  # performs requests on behalf of the service account that Argo CD asks for.
+  # Default: false
+  agent.resource-proxy.impersonation.enabled: {{ .Values.enableResourceProxyImpersonation | quote }}
   # agent.cache.refresh-interval: Cache refresh interval.
   # Default: "10s"
   agent.cache.refresh-interval: {{ .Values.cacheRefreshInterval | quote }}

@@ -110,6 +110,10 @@ type Agent struct {
 
 	// enableResourceProxy determines if the agent should proxy resources to the principal
 	enableResourceProxy bool
+	// enableResourceProxyImpersonation determines if the agent performs
+	// resource proxy requests on behalf of the service account the principal
+	// asks for, instead of refusing them
+	enableResourceProxyImpersonation bool
 
 	// resourceProcSem bounds the number of resource requests that are
 	// processed concurrently. See processIncomingEvent.
