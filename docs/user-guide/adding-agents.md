@@ -7,6 +7,10 @@ This document explains how to add new agents to your argocd-agent deployment and
     cluster secrets manually, see
     [Agent self-registration (Beta)](./self-registration.md).
 
+!!! tip "Managing the control plane with GitOps?"
+    The resources this guide creates with the CLI can also be created from
+    manifests, see [Adding agents declaratively](./declarative-agents.md).
+
 ## Overview
 
 Adding a new agent involves several steps:
