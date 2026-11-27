@@ -18,21 +18,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
+	fakeappclient "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
+	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/utils/ptr"
 
 	"github.com/argoproj-labs/argocd-agent/internal/auth"
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	backend_mocks "github.com/argoproj-labs/argocd-agent/internal/backend/mocks"
 	"github.com/argoproj-labs/argocd-agent/internal/event"
 	"github.com/argoproj-labs/argocd-agent/internal/event/targets"
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/application"
 	"github.com/argoproj-labs/argocd-agent/internal/manager/appproject"
@@ -3082,4 +3088,158 @@ func Test_processIncomingApplication_AdoptsExistingApplications(t *testing.T) {
 		require.True(t, exists)
 		require.Equal(t, expectedPrincipalUID, principalUID)
 	})
+}
+
+func Test_ProcessIncomingApplication_Terminating(t *testing.T) {
+	newIncoming := func() *v1alpha1.Application {
+		return &v1alpha1.Application{ObjectMeta: v1.ObjectMeta{
+			Name:        "guestbook",
+			Namespace:   "argocd",
+			Annotations: map[string]string{manager.SourceUIDAnnotation: "source-uid"},
+		}}
+	}
+
+	tests := []struct {
+		name        string
+		eventType   event.EventType
+		terminating bool
+		wantCreated bool
+	}{
+		{name: "create event for an application that is not terminating", eventType: event.Create, wantCreated: true},
+		{name: "spec update for an application that is not terminating", eventType: event.SpecUpdate, wantCreated: true},
+		{name: "create event for an application that is being deleted", eventType: event.Create, terminating: true},
+		{name: "spec update for an application that is being deleted", eventType: event.SpecUpdate, terminating: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, kubec := newAgentManaged(t)
+			a.context = context.Background()
+			incoming := newIncoming()
+			if tt.terminating {
+				incoming.DeletionTimestamp = ptr.To(v1.Now())
+			}
+			ce := event.NewEventSource("principal").ApplicationEvent(tt.eventType, incoming)
+
+			err := a.processIncomingApplication(event.New(ce, targets.Application))
+
+			require.NoError(t, err)
+			_, err = kubec.ApplicationsClientset.ArgoprojV1alpha1().Applications("argocd").Get(context.Background(), "guestbook", v1.GetOptions{})
+			if tt.wantCreated {
+				require.NoError(t, err)
+			} else {
+				require.True(t, kerrors.IsNotFound(err), "an application that is being deleted must not be created")
+			}
+		})
+	}
+}
+
+// Test_ManagedDeleteWithTransientUpdateFailure covers the principal deleting an
+// application while the agent's update that carries the deletionTimestamp
+// fails with an error that is worth retrying. The deletion goes through, so the
+// event must be ACKed, and a redelivery must not bring the application back.
+func Test_ManagedDeleteWithTransientUpdateFailure(t *testing.T) {
+	existing := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:        "guestbook",
+			Namespace:   "argocd",
+			Annotations: map[string]string{manager.SourceUIDAnnotation: "source-uid"},
+		},
+	}
+
+	a, kubec := newAgentManaged(t, existing.DeepCopy())
+	a.context = context.Background()
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+	require.NoError(t, a.appManager.Manage(existing.QualifiedName()))
+
+	appC, ok := kubec.ApplicationsClientset.(*fakeappclient.Clientset)
+	require.True(t, ok)
+	var failures atomic.Int32
+	transient := func(k8stesting.Action) (bool, runtime.Object, error) {
+		if failures.Add(1) == 1 {
+			return true, nil, kerrors.NewInternalError(fmt.Errorf("the update failed"))
+		}
+		return false, nil, nil
+	}
+	appC.PrependReactor("patch", "applications", transient)
+	appC.PrependReactor("update", "applications", transient)
+
+	incoming := existing.DeepCopy()
+	incoming.DeletionTimestamp = ptr.To(v1.Now())
+	ev := event.New(event.NewEventSource("principal").ApplicationEvent(event.SpecUpdate, incoming), targets.Application)
+	appGone := func(t *testing.T) {
+		t.Helper()
+		_, err := appC.ArgoprojV1alpha1().Applications("argocd").Get(context.Background(), "guestbook", v1.GetOptions{})
+		require.True(t, kerrors.IsNotFound(err), "expected the application to be gone, got err=%v", err)
+	}
+
+	err := a.processIncomingEvent(ev)
+
+	require.NoError(t, err, "the deletion went through, so the event must be ACKed")
+	require.Equal(t, int32(1), failures.Load(), "the update must have failed once")
+	appGone(t)
+
+	// What the informer does once the application is gone.
+	a.addAppDeletionToQueue(existing.DeepCopy())
+	require.False(t, a.appManager.IsManaged(existing.QualifiedName()))
+
+	// The principal sends the event again, e.g. because the ACK got lost.
+	require.NoError(t, a.processIncomingEvent(ev))
+	appGone(t)
+}
+
+// Test_ManagedDeleteRetriesWhenFinalizersMustChange covers the same failure as
+// above for an event that also removes a finalizer. The deletion does not
+// remove finalizers, so the event must not be ACKed before the update went
+// through.
+func Test_ManagedDeleteRetriesWhenFinalizersMustChange(t *testing.T) {
+	existing := &v1alpha1.Application{
+		ObjectMeta: v1.ObjectMeta{
+			Name:        "guestbook",
+			Namespace:   "argocd",
+			Annotations: map[string]string{manager.SourceUIDAnnotation: "source-uid"},
+			Finalizers:  []string{"resources-finalizer.argocd.argoproj.io"},
+		},
+	}
+
+	a, kubec := newAgentManaged(t, existing.DeepCopy())
+	a.context = context.Background()
+	a.remote.SetClientID("agent")
+	a.emitter = event.NewEventSource("principal")
+	require.NoError(t, a.appManager.Manage(existing.QualifiedName()))
+
+	appC, ok := kubec.ApplicationsClientset.(*fakeappclient.Clientset)
+	require.True(t, ok)
+	var failures atomic.Int32
+	appC.PrependReactor("patch", "applications", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if failures.Add(1) == 1 {
+			return true, nil, kerrors.NewInternalError(fmt.Errorf("the update failed"))
+		}
+		return false, nil, nil
+	})
+	// Like a real API server, which keeps an application with finalizers, the fake one must not delete it.
+	appC.PrependReactor("delete", "applications", func(k8stesting.Action) (bool, runtime.Object, error) {
+		current, err := appC.Tracker().Get(v1alpha1.SchemeGroupVersion.WithResource("applications"), "argocd", "guestbook")
+		if err == nil && len(current.(*v1alpha1.Application).Finalizers) > 0 {
+			return true, nil, kerrors.NewConflict(schema.GroupResource{Group: "argoproj.io", Resource: "applications"}, "guestbook", fmt.Errorf("finalizers are still set"))
+		}
+		return false, nil, nil
+	})
+
+	incoming := existing.DeepCopy()
+	incoming.Finalizers = nil
+	incoming.DeletionTimestamp = ptr.To(v1.Now())
+	ev := event.New(event.NewEventSource("principal").ApplicationEvent(event.SpecUpdate, incoming), targets.Application)
+
+	err := a.processIncomingEvent(ev)
+
+	require.Error(t, err)
+	require.True(t, kube.IsRetryableError(err), "the agent skips the ACK for retryable errors: %v", err)
+	got, getErr := appC.ArgoprojV1alpha1().Applications("argocd").Get(context.Background(), "guestbook", v1.GetOptions{})
+	require.NoError(t, getErr, "the application must stay until its finalizers are removed")
+	require.Equal(t, existing.Finalizers, got.Finalizers)
+
+	require.NoError(t, a.processIncomingEvent(ev), "the retry removes the finalizers and deletes the application")
+	_, getErr = appC.ArgoprojV1alpha1().Applications("argocd").Get(context.Background(), "guestbook", v1.GetOptions{})
+	require.True(t, kerrors.IsNotFound(getErr), "expected the application to be gone, got err=%v", getErr)
 }

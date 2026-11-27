@@ -23,11 +23,13 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 
 	"github.com/argoproj-labs/argocd-agent/internal/backend"
 	"github.com/argoproj-labs/argocd-agent/internal/cache"
+	"github.com/argoproj-labs/argocd-agent/internal/kube"
 	"github.com/argoproj-labs/argocd-agent/internal/logging"
 	"github.com/argoproj-labs/argocd-agent/internal/logging/logfields"
 	"github.com/argoproj-labs/argocd-agent/internal/manager"
@@ -375,6 +377,18 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 
 	if deletionTimestampChanged {
 		logCtx.Infof("deletionTimestamp of managed agent changed from nil to non-nil, so deleting Application")
+		if err != nil {
+			// Deleting does not remove finalizers, so retry when they have to change.
+			if kube.IsRetryableError(err) && !errors.IsInvalid(err) && !sets.New(incoming.Finalizers...).Equal(sets.New(originalOnCluster.Finalizers...)) {
+				return nil, err
+			}
+			logCtx.WithError(err).Warn("Could not update the application before deleting it")
+			// updated is nil. The update may have been written anyway, so read the application again.
+			updated = originalOnCluster
+			if current, getErr := m.applicationBackend.Get(context.WithValue(ctx, backend.ForUpdateContextKey, true), incoming.Name, incoming.Namespace); getErr == nil {
+				updated = current
+			}
+		}
 		// Mark this as a valid deletion so the callback does not treat it as a user-initiated deletion.
 		if m.deletions != nil {
 			if v, ok := updated.Annotations[manager.SourceUIDAnnotation]; ok {
@@ -382,10 +396,12 @@ func (m *ApplicationManager) UpdateManagedApp(ctx context.Context, incoming *v1a
 			}
 		}
 
-		if err := m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, ptr.To(backend.DeletePropagationForeground)); err != nil {
-			return nil, err
+		if deleteErr := m.applicationBackend.Delete(ctx, incoming.Name, incoming.Namespace, ptr.To(backend.DeletePropagationForeground)); deleteErr != nil {
+			return nil, deleteErr
 		}
 		logging.LogActionDelete(logCtx, "application", incoming.Namespace, incoming.Name)
+		// The event asked for the deletion, so do not withhold the ACK for the update error.
+		err = nil
 	}
 
 	return updated, err
