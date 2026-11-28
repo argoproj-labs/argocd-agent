@@ -243,6 +243,12 @@ spec:
                 name: argocd-agent-params
                 key: principal.resource-proxy.enable
                 optional: true
+          - name: ARGOCD_PRINCIPAL_DISABLE_REDIS_PROXY
+            valueFrom:
+              configMapKeyRef:
+                name: argocd-agent-params
+                key: principal.redis-proxy.disable
+                optional: true
           - name: ARGOCD_PRINCIPAL_KEEP_ALIVE_MIN_INTERVAL
             valueFrom:
               configMapKeyRef:

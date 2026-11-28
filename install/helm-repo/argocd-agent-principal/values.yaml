@@ -259,7 +259,8 @@ principal:
           secretName: "argocd-redis-proxy-tls"
 
   redisProxy:
-    # -- Enable the Redis proxy sidecar.
+    # -- Enable the Redis proxy. When false, the principal does not start it
+    # and its Service is not created.
     enabled: true
 
   resourceProxy:

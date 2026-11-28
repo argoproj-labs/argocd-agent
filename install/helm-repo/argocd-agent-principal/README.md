@@ -1,6 +1,6 @@
 # argocd-agent-principal
 
-![Version: 0.3.8](https://img.shields.io/badge/Version-0.3.8-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.10.0](https://img.shields.io/badge/AppVersion-v0.10.0-informational?style=flat-square)
+![Version: 0.3.9](https://img.shields.io/badge/Version-0.3.9-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.10.0](https://img.shields.io/badge/AppVersion-v0.10.0-informational?style=flat-square)
 
 Argo CD Agent Principal component for multi-cluster application management
 
@@ -92,7 +92,7 @@ Kubernetes: `>=1.24.0-0`
 | principal.redis.tls.caSecretName | string | `"argocd-redis-tls"` | Name of the Secret containing the Redis TLS CA certificate (key: ca.crt). |
 | principal.redis.tls.enabled | bool | `false` | Enable TLS for Redis connections. |
 | principal.redis.tls.insecure | bool | `false` | Skip verification of the Redis TLS certificate. INSECURE — development only. |
-| principal.redisProxy.enabled | bool | `true` | Enable the Redis proxy sidecar. |
+| principal.redisProxy.enabled | bool | `true` | Enable the Redis proxy. When false, the principal does not start it and its Service is not created. |
 | principal.resourceProxy.ca.path | string | `""` | Path to the resource proxy CA certificate inside the container. |
 | principal.resourceProxy.ca.secretName | string | `"argocd-agent-ca"` | Name of the Secret containing the CA certificate for the resource proxy. |
 | principal.resourceProxy.enabled | bool | `true` | Enable the resource proxy (required for destination-based mapping). |
