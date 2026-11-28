@@ -2233,3 +2233,65 @@ func Test_DeleteEventOwnership_ManagedMode(t *testing.T) {
 		require.NoError(t, s.processApplicationEvent(ctx, ownerAgent, &ev))
 	})
 }
+
+func Test_processRecvQueue_DisabledProxies(t *testing.T) {
+	evs := event.NewEventSource("agent")
+	redisResponse := event.RedisResponseBody{Get: &event.RedisResponseBodyGet{Bytes: []byte("value")}}
+	tests := []struct {
+		name          string
+		ev            *cloudevents.Event
+		opts          []ServerOption
+		wantErr       string
+		wantForbidden bool
+	}{
+		{
+			name:          "redis response with redis proxy disabled",
+			ev:            evs.NewRedisResponseEvent("req-uuid", "conn-uuid", redisResponse),
+			opts:          []ServerOption{WithRedisProxyDisabled()},
+			wantForbidden: true,
+		},
+		{
+			// The response is handed to a goroutine, so processRecvQueue returns no error.
+			name: "redis response with redis proxy enabled",
+			ev:   evs.NewRedisResponseEvent("req-uuid", "conn-uuid", redisResponse),
+		},
+		{
+			name:          "resource response with resource proxy disabled",
+			ev:            evs.NewResourceResponseEvent("req-uuid", 200, "{}"),
+			opts:          []ServerOption{WithRedisProxyDisabled()},
+			wantForbidden: true,
+		},
+		{
+			// The guard must not reject responses when the proxy is running.
+			name:    "resource response with resource proxy enabled",
+			ev:      evs.NewResourceResponseEvent("req-uuid", 200, "{}"),
+			opts:    []ServerOption{WithRedisProxyDisabled(), WithResourceProxyEnabled(true)},
+			wantErr: "resource response not tracked",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wq := wqmock.NewTypedRateLimitingInterface[*cloudevents.Event](t)
+			wq.On("Get").Return(tt.ev, false)
+			wq.On("Done", tt.ev)
+			wq.On("Len").Return(0).Maybe()
+			opts := append([]ServerOption{WithGeneratedTokenSigningKey()}, tt.opts...)
+			s, err := NewServer(context.Background(), kube.NewKubernetesFakeClientWithApps("argocd"), "argocd", opts...)
+			require.NoError(t, err)
+
+			require.NotPanics(t, func() {
+				_, err = s.processRecvQueue(context.Background(), "agent", wq)
+			})
+			if tt.wantForbidden {
+				require.ErrorIs(t, err, event.ErrEventNotAllowed)
+				return
+			}
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+			require.NotErrorIs(t, err, event.ErrEventNotAllowed)
+		})
+	}
+}

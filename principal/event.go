@@ -112,8 +112,16 @@ func (s *Server) processRecvQueue(ctx context.Context, agentName string, q workq
 	case targets.AppProject:
 		err = s.processAppProjectEvent(ctx, agentName, ev)
 	case targets.Resource:
+		if s.resourceProxy == nil {
+			err = event.NewEventNotAllowedErr("resource proxy is disabled")
+			break
+		}
 		err = s.processResourceEventResponse(ctx, agentName, ev)
 	case targets.Redis:
+		if s.redisProxy == nil {
+			err = event.NewEventNotAllowedErr("redis proxy is disabled")
+			break
+		}
 		resReq := &event.RedisResponse{}
 		err := ev.DataAs(resReq)
 		if err == nil {
